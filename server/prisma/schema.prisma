@@ -146,6 +146,8 @@ model ResultadoModelo {
 
   createdAt DateTime @default(now())
 
+  correccionJuicio CorreccionJuicio?
+
   @@index([casoPruebaId])
   @@index([modelo])
 }
@@ -160,6 +162,12 @@ model CorreccionJuicio {
   id          String    @id @default(cuid())
   casoDeUsoId String
   casoDeUso   CasoDeUso @relation(fields: [casoDeUsoId], references: [id])
+
+  /// Liga esta calibración al resultado puntual de baja confianza que la originó.
+  /// Null en las correcciones sembradas históricamente (no se generaron desde un
+  /// ResultadoModelo vivo). Único: un resultado se calibra una sola vez.
+  resultadoModeloId String?          @unique
+  resultadoModelo   ResultadoModelo? @relation(fields: [resultadoModeloId], references: [id])
 
   dominio             String
   question            String

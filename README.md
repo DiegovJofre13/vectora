@@ -82,8 +82,14 @@ Con `npm run dev` corriendo (server + client + fixtures demo):
 4. Paso 3: confirma el costo estimado y corre — vas a ver progreso en vivo por modelo.
 5. Reporte: veredicto, tabla comparativa, y la frontera de Pareto costo-vs-precisión.
 
+## Probar calibración y gobernanza (Módulos 3 y 4)
+
+1. Pestaña "Calibrar el juez": la cola muestra los resultados con confianza < 65% (6 en el seed) — pregunta, contexto, respuesta del sistema, veredicto y nivel de duda. "Es correcta" o "Corregir" (con textarea) persisten la calibración y suben el contador de acuerdo juez-experto.
+2. Pestaña "Gobernanza": tarjetas de gasto/ahorro/casos activos, tabla de casos en producción con estado derivado (óptimo / cambio sugerido / evaluación vieja), e historial de eventos.
+3. "Simular modelo nuevo" (habilitado solo en casos con sistema conectado, ej. "Bot de soporte") re-corre de verdad las ~30 preguntas guardadas contra el probe con un modelo del catálogo que aún no se había evaluado — toma ~1 minuto real y alerta solo si la recomendación cambia.
+
 ## Estado del proyecto
 
-**Fase 1 (esqueleto) y Fase 2 (Módulos 1 y 2) completas**: monorepo, SDK `@vectora/probe` (register/wrap funcionales), motor Mock de modelos, Fastify + Prisma + SQLite, seed de "Fintech Andina" (5 casos de uso, historial de evaluación, 200 correcciones de juicio calibradas). Motor de evaluación real: agente generador de preguntas desde KB, scoring dual (estructural + juez), orquestador con rate limiting, estimador de costo, y reporte con veredicto + Pareto. UI del stepper de conexión y del reporte, probados de punta a punta en navegador real.
+**Fases 1 a 3 completas**: monorepo, SDK `@vectora/probe` (register/wrap funcionales), motor Mock de modelos, Fastify + Prisma + SQLite, seed de "Fintech Andina". Motor de evaluación real (agente generador, scoring dual, orquestador con rate limiting, estimador de costo, reporte con veredicto + Pareto). Calibración del juez con cola de baja confianza y contador de acuerdo por dominio. Registro de gobernanza con ledger derivado, tarjetas resumen, y alertas por evento que re-ejecutan el sistema real del cliente. Todo probado de punta a punta en navegador real (Chromium vía Playwright ad hoc).
 
-Pendiente (ver DECISIONS.md § Próximas fases): Módulos 3-4 (calibración del juez + gobernanza), export PDF real y `CONNECT-REAL-MODELS.md`.
+Pendiente (ver DECISIONS.md § Próximas fases): export PDF real (hoy es `window.print()`), estados vacíos/errores más pulidos, y `CONNECT-REAL-MODELS.md`.

@@ -93,7 +93,7 @@ export async function iniciarCorrida(
   await db.casoDeUso.update({ where: { id: casoDeUso.id }, data: { estado: "conectado" } });
 
   // Fire-and-forget: la UI hace polling de progreso vía GET .../progreso.
-  void ejecutarCorridaEnSegundoPlano(corrida.id, casoDeUso.probeUrl, modelos).catch(async (err) => {
+  void ejecutarCorridaParaGobernanza(corrida.id, casoDeUso.probeUrl, modelos).catch(async (err) => {
     console.error(`[orchestrator] corrida ${corrida.id} falló:`, err);
     await db.evaluacionCorrida.update({ where: { id: corrida.id }, data: { estado: "error" } });
   });
@@ -119,7 +119,7 @@ async function llamarProbe(
   }
 }
 
-async function ejecutarCorridaEnSegundoPlano(corridaId: string, probeUrl: string, modelos: string[]): Promise<void> {
+export async function ejecutarCorridaParaGobernanza(corridaId: string, probeUrl: string, modelos: string[]): Promise<void> {
   const corrida = await db.evaluacionCorrida.findUniqueOrThrow({
     where: { id: corridaId },
     include: { casoDeUso: true, casosPrueba: true },

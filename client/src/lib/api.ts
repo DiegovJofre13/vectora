@@ -184,3 +184,96 @@ export async function obtenerReporte(casoId: string, corridaId: string): Promise
   const data = await req<{ reporte: ReporteEvaluacion }>(`/api/casos-de-uso/${casoId}/evaluaciones/${corridaId}/reporte`);
   return data.reporte;
 }
+
+// --- Módulo 3: calibración del juez ---
+
+export interface PendienteCalibracion {
+  resultadoModeloId: string;
+  casoDeUsoId: string;
+  casoDeUsoNombre: string;
+  dominio: string;
+  modelo: string;
+  question: string;
+  context: string;
+  systemAnswer: string;
+  provisionalExpected: string;
+  judgeVerdict: { groundedness: number | null; relevancia: number | null; completitud: number | null; promedio: number | null };
+  confidence: number;
+}
+
+export interface ResumenCalibracionDominio {
+  dominio: string;
+  calibrados: number;
+  pendientes: number;
+  porcentajeAcuerdo: number;
+}
+
+export async function obtenerPendientesCalibracion(): Promise<PendienteCalibracion[]> {
+  const data = await req<{ pendientes: PendienteCalibracion[] }>("/api/calibracion/pendientes");
+  return data.pendientes;
+}
+
+export async function obtenerResumenCalibracion(): Promise<ResumenCalibracionDominio[]> {
+  const data = await req<{ resumen: ResumenCalibracionDominio[] }>("/api/calibracion/resumen");
+  return data.resumen;
+}
+
+export async function registrarCalibracion(
+  resultadoModeloId: string,
+  humanVerdict: "correcta" | "corregida",
+  correctedAnswer?: string
+): Promise<void> {
+  await req(`/api/calibracion/${resultadoModeloId}`, { method: "POST", body: JSON.stringify({ humanVerdict, correctedAnswer }) });
+}
+
+// --- Módulo 4: registro de gobernanza ---
+
+export interface FilaLedger {
+  casoDeUsoId: string;
+  nombre: string;
+  tipoTarea: string;
+  volumenMensual: number | null;
+  modeloProduccion: string | null;
+  costoMensualProduccion: number | null;
+  ultimaEvaluacion: string | null;
+  estado: "optimo" | "cambio_sugerido" | "evaluacion_vieja" | "sin_evaluar";
+  modeloRecomendado: string | null;
+  ahorroPctVsProduccion: number | null;
+  probeConectado: boolean;
+}
+
+export interface ResumenGobernanza {
+  gastoMensualUsd: number;
+  ahorroAcumuladoUsd: number;
+  casosActivos: number;
+  casosRequierenReevaluacion: number;
+}
+
+export interface EventoGobernanza {
+  id: string;
+  casoDeUsoId: string;
+  tipo: string;
+  descripcion: string;
+  huboImpacto: boolean;
+  createdAt: string;
+  casoDeUso: { nombre: string };
+}
+
+export async function obtenerLedger(): Promise<FilaLedger[]> {
+  const data = await req<{ ledger: FilaLedger[] }>("/api/gobernanza/ledger");
+  return data.ledger;
+}
+
+export async function obtenerResumenGobernanza(): Promise<ResumenGobernanza> {
+  const data = await req<{ resumen: ResumenGobernanza }>("/api/gobernanza/resumen");
+  return data.resumen;
+}
+
+export async function obtenerHistorialEventos(): Promise<EventoGobernanza[]> {
+  const data = await req<{ eventos: EventoGobernanza[] }>("/api/gobernanza/eventos");
+  return data.eventos;
+}
+
+export async function simularEventoNuevoModelo(casoId: string): Promise<{ evento: EventoGobernanza }> {
+  return req(`/api/casos-de-uso/${casoId}/eventos/simular-modelo-nuevo`, { method: "POST", body: "{}" });
+}

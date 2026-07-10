@@ -151,10 +151,13 @@ async function sembrarEvaluacionEstructural(opts: CasoEstructuralOpts) {
 
   for (let i = 0; i < opts.numCasos; i++) {
     const inputSintetico = { id: `doc-${opts.dominioLabel}-${i + 1}`, resumen: `Documento ${i + 1} de ${opts.dominioLabel}` };
+    // Mismo sobre {documento, esperado} que espera el orquestador en vivo (engine/orchestrator.ts),
+    // para que estos casos sembrados sean re-corribles de verdad desde el Módulo 4 (alertas por evento).
+    const envoltura = { documento: inputSintetico, esperado: { campo1: "valor-esperado-1", campo2: "valor-esperado-2" }, camposAmbiguos: [] };
     const casoPrueba = await db.casoPrueba.create({
       data: {
         evaluacionCorridaId: corrida.id,
-        input: JSON.stringify(inputSintetico),
+        input: JSON.stringify(envoltura),
         esSintetico: false, // documento existente del cliente, no generado
       },
     });
@@ -226,6 +229,9 @@ async function main() {
   const modeloBarato = CATALOGO_MODELOS.find((m) => m.tier === "barato")!;
   const modeloOpen = CATALOGO_MODELOS.find((m) => m.tier === "open")!;
   const panelCompleto = [modeloFrontera, ...modelosIntermedios, modeloBarato, modeloOpen];
+  // El bot de soporte deja afuera el modelo open a propósito: así el Módulo 4 tiene un
+  // modelo "nuevo" real que simular ("salió un modelo nuevo") contra su probe conectado.
+  const panelSinOpen = [modeloFrontera, ...modelosIntermedios, modeloBarato];
 
   // --- Caso 1: Bot de soporte (RAG) — historial completo + calibración ---
   const botSoporte = await db.casoDeUso.create({
@@ -247,7 +253,7 @@ async function main() {
   await sembrarEvaluacionRag({
     casoDeUsoId: botSoporte.id,
     preguntas: PREGUNTAS_BOT_SOPORTE,
-    modelos: panelCompleto,
+    modelos: panelSinOpen,
     indicesBajaConfianza: [2, 7, 13, 19, 25, 29],
     completadaHaceDias: 6,
   });
