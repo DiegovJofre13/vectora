@@ -59,7 +59,35 @@ Se usó la configuración clásica de Tailwind v3 (`tailwind.config.js` + PostCS
 ### Vulnerabilidad conocida y aceptada: esbuild/vite (dev-only)
 `npm audit` reporta una vulnerabilidad moderada en `esbuild <=0.24.2` (usado por Vite 5): un sitio malicioso podría enviar requests al dev server y leer la respuesta. Solo afecta al servidor de desarrollo local (no a builds de producción) y arreglarla requiere saltar a Vite 8 (breaking change no evaluado). Se deja pendiente para revisar en Fase 4 (pulido), no se ignora silenciosamente.
 
+## Fase 2 — Conectar y evaluar (Módulos 1 y 2)
+
+### El KB / documentos existentes se suben directo a Vectora, no a través del probe
+El contrato del SDK (`register` + `wrap`) es deliberadamente mínimo: no hay un tercer gancho para "listar documentos" o "exponer el knowledge base". Pero el agente generador necesita leer contenido para producir preguntas, y el scoring estructural necesita un ground truth (RUT/monto/fecha correctos) contra el cual comparar. Se decidió que el paso 2 del stepper le pide estos insumos **directamente al usuario en la UI de Vectora** (textarea de documentos KB, o pares documento+campos-esperados para extracción/clasificación), no a través del probe. Esto es consistente con "el cliente da acceso completo a su sistema... incluido el knowledge base cuando el caso lo requiera" — es acceso separado del gancho de ejecución, no otro hook del SDK. `POST /api/casos-de-uso/:id/evaluaciones` recibe `kbDocs` o `documentosExistentes` junto con los modelos elegidos, en la misma llamada que dispara la corrida.
+
+### El agente generador es plantillas deterministas, no una llamada LLM real
+Generar preguntas realmente novedosas a partir de texto arbitrario requeriría una llamada de generación a un LLM — que no existe en el motor Mock (solo se mockea la llamada del *cliente*, no hay un "modelo generador" real disponible). `generatorAgent.ts` sintetiza preguntas con plantillas que combinan el título del documento con una frase real extraída de su contenido (no solo el título), para que la pregunta comparta vocabulario genuino con la respuesta esperada. Sin esto, el juez léxico (ver abajo) no tendría ninguna señal real que medir. Documentado como aproximación explícita, reemplazable por una llamada real más adelante.
+
+### El juez es una heurística de solapamiento léxico real, no números fabricados
+A diferencia del seed de Fase 1 (que fabricaba scores directamente para verse bien en la demo), el juez de la Fase 2 (`engine/judge.ts`) **calcula de verdad** groundedness/relevancia/completitud comparando conjuntos de palabras entre pregunta, contexto recuperado, respuesta y referencia provisional — sin llamar a ningún modelo. Es honesto: los scores resultantes son modestos (~45-60% en las pruebas end-to-end) porque un solapamiento léxico crudo es un proxy imperfecto de calidad real, no un juez semántico. Se prefirió esto a inflar los números artificialmente — un run real contra el motor Mock debía producir un resultado *computado*, no actuado. La confianza del juez se deriva de cuánta varianza hay entre los 3 criterios (más varianza → menos confianza), lo que además genera de forma orgánica los casos de baja confianza que alimentan el Módulo 3, sin tener que forzarlos.
+
+### Scoring estructural: comparación exacta salvo campos declarados ambiguos
+`engine/structuralScoring.ts` compara campo por campo contra el ground truth que el usuario aportó. Los campos marcados como `camposAmbiguos` (ej. "resumen", "motivo") usan similitud de palabras en vez de igualdad exacta — el resto exige coincidencia exacta normalizada (minúsculas, sin acentos). Sin juez LLM, tal como pide la arquitectura de scoring.
+
+### Orquestador: fire-and-forget + polling, no websockets
+`POST .../evaluaciones` crea la corrida y sus casos de prueba sincrónicamente (rápido, sin llamadas de red), y dispara la ejecución real en segundo plano sin esperarla (`void ejecutarCorridaEnSegundoPlano(...)`). La UI hace polling a `GET .../progreso` cada 1.2s. Se prefirió esto a WebSockets/SSE porque el progreso es una consulta de agregación simple sobre `ResultadoModelo` (cuenta cuántos ya existen por modelo) — no hay estado en memoria que sincronizar, así que un restart del server no deja el progreso "colgado": la próxima consulta simplemente refleja lo que ya está en la DB.
+
+### Rate limiting: límite de concurrencia propio, no una librería
+`lib/pLimit.ts` es un limitador de concurrencia de ~20 líneas (cola + contador de tareas activas), usado para no disparar los ~150 POST al probe del cliente todos a la vez (`CONCURRENCIA_MAXIMA = 4` en `orchestrator.ts`). No se agregó `p-limit` como dependencia por algo tan simple.
+
+### Ranking del reporte: "ajuste al caso de uso", no precisión pura
+`engine/report.ts` ordena la tabla por `ajusteCasoUso = retencionCalidad·0.7 + (1 − costoRelativo)·0.3`, donde `retencionCalidad` es la precisión del modelo relativa a la más alta del panel. Esto es lo que permite recomendar "el barato-suficiente" en vez de siempre al más preciso — el modelo con mayor `ajusteCasoUso` es el veredicto. Los tags (óptimo/valor/máxima precisión/open) se asignan por prioridad: óptimo (el recomendado) > máxima precisión (score más alto) > open (openWeights) > valor (está en la frontera de Pareto pero no es ninguno de los anteriores).
+
+### Frontend: estado de vista en React, sin librería de routing
+Con 3 vistas (lista, stepper de nuevo caso, reporte) un `useState<Vista>` en `App.tsx` alcanza — no se agregó `react-router` para esto. Si el número de vistas crece (ej. detalle de caso con URL propia, deep-linking a un reporte), se reconsidera.
+
+### Verificación visual con Playwright (herramienta ad hoc, no dependencia del repo)
+No había navegador disponible en el entorno por defecto. Se instaló Chromium vía `npx playwright install chromium` y se corrió un script de verificación end-to-end (crear caso → conectar al probe demo → cargar KB → correr evaluación real → ver reporte) desde un directorio de scratch, fuera del repo. No se agregó `playwright` como dependencia del proyecto — fue una herramienta de verificación puntual para esta sesión, no parte del producto. Encontró y permitió corregir dos problemas reales: (1) los porcentajes de precisión se mostraban redondeados a enteros, lo que hacía que modelos con scores genuinamente distintos (48.7%, 48.9%, 49.1%) se vieran idénticos — se cambió a un decimal; (2) las etiquetas de puntos cercanos en el gráfico de Pareto se superponían — se alternan arriba/abajo según orden de costo.
+
 ## Próximas fases
-- **Fase 2**: Módulos 1 y 2 (stepper de conexión, agente generador de preguntas desde el KB, scoring dual estructural/juez, reporte con Pareto).
 - **Fase 3**: Módulos 3 y 4 (calibración del juez, ledger de gobernanza, alertas por evento).
-- **Fase 4**: export PDF, estados vacíos/errores, `CONNECT-REAL-MODELS.md`.
+- **Fase 4**: export PDF real (hoy es `window.print()`), estados vacíos/errores, `CONNECT-REAL-MODELS.md`.

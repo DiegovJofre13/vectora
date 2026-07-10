@@ -5,21 +5,182 @@ export interface CasoDeUsoResumen {
   nombre: string;
   descripcion: string;
   tipoTarea: string;
+  requiereGenerador: boolean;
+  dominio: string;
+  probeUrl: string | null;
   estado: string;
   modeloProduccion: string | null;
   costoMensualProduccion: number | null;
   volumenMensual: number | null;
 }
 
+export interface Organizacion {
+  id: string;
+  nombre: string;
+}
+
+export interface ModeloCatalogo {
+  id: string;
+  nombre: string;
+  proveedor: string;
+  tier: "frontera" | "intermedio" | "barato" | "open";
+  precioPor1KUsd: number;
+  openWeights: boolean;
+  latenciaBaseMs: number;
+  calidadBase: number;
+}
+
+export interface EstimacionCosto {
+  costoTotalUsd: number;
+  costoPorModelo: { modelo: string; costoUsd: number }[];
+  numCasos: number;
+  numModelos: number;
+}
+
+export interface ProgresoCorrida {
+  estado: string;
+  numCasos: number;
+  numModelos: number;
+  completados: number;
+  porModelo: Record<string, number>;
+}
+
+export interface FilaReporte {
+  modelo: string;
+  nombre: string;
+  proveedor: string;
+  tier: string;
+  openWeights: boolean;
+  precision: number;
+  latenciaP95Ms: number;
+  costoPromedioUsd: number;
+  costoPor1KUsd: number;
+  tag: "optimo" | "valor" | "maxima_precision" | "open" | null;
+  ajusteCasoUso: number;
+}
+
+export interface ReporteEvaluacion {
+  corridaId: string;
+  estado: string;
+  veredicto: {
+    modeloRecomendado: string;
+    nombreRecomendado: string;
+    justificacion: string;
+    precision: number;
+    costoPor1KUsd: number;
+    latenciaP95Ms: number;
+    ahorroPctVsProduccion: number | null;
+  } | null;
+  filas: FilaReporte[];
+  pareto: { modelo: string; costoPor1KUsd: number; precision: number; esFrontera: boolean; esRecomendado: boolean }[];
+  esRag: boolean;
+  calloutReferenciaProvisional: boolean;
+}
+
+async function req<T>(path: string, init?: RequestInit): Promise<T> {
+  const res = await fetch(`${API_URL}${path}`, {
+    ...init,
+    headers: { "content-type": "application/json", ...(init?.headers ?? {}) },
+  });
+  const data = await res.json();
+  if (!res.ok || data?.ok === false) {
+    throw new Error(data?.error ?? `Error ${res.status}`);
+  }
+  return data as T;
+}
+
 export async function obtenerSalud(): Promise<{ ok: boolean; organizaciones: number; version: string }> {
-  const res = await fetch(`${API_URL}/api/salud`);
-  if (!res.ok) throw new Error("No se pudo conectar al server de Vectora");
-  return res.json();
+  return req("/api/salud");
 }
 
 export async function listarCasosDeUso(): Promise<CasoDeUsoResumen[]> {
-  const res = await fetch(`${API_URL}/api/casos-de-uso`);
-  if (!res.ok) throw new Error("No se pudieron cargar los casos de uso");
-  const data = await res.json();
+  const data = await req<{ casos: CasoDeUsoResumen[] }>("/api/casos-de-uso");
   return data.casos;
+}
+
+export async function obtenerCaso(id: string): Promise<any> {
+  const data = await req<{ caso: any }>(`/api/casos-de-uso/${id}`);
+  return data.caso;
+}
+
+export async function listarOrganizaciones(): Promise<Organizacion[]> {
+  const data = await req<{ organizaciones: Organizacion[] }>("/api/organizaciones");
+  return data.organizaciones;
+}
+
+export async function obtenerCatalogo(): Promise<ModeloCatalogo[]> {
+  const data = await req<{ modelos: ModeloCatalogo[] }>("/api/catalogo-modelos");
+  return data.modelos;
+}
+
+export async function sugerirModelosApi(input: {
+  tipoTarea: string;
+  nombre: string;
+  descripcion: string;
+  volumenMensual?: number;
+}): Promise<string[]> {
+  const data = await req<{ sugeridos: string[] }>("/api/sugerir-modelos", { method: "POST", body: JSON.stringify(input) });
+  return data.sugeridos;
+}
+
+export interface CrearCasoInput {
+  organizacionId: string;
+  nombre: string;
+  descripcion: string;
+  tipoTarea: string;
+  dominio: string;
+  volumenMensual?: number;
+  modeloProduccion?: string;
+  costoMensualProduccion?: number;
+}
+
+export async function crearCasoDeUso(input: CrearCasoInput): Promise<CasoDeUsoResumen> {
+  const data = await req<{ caso: CasoDeUsoResumen }>("/api/casos-de-uso", { method: "POST", body: JSON.stringify(input) });
+  return data.caso;
+}
+
+export async function verificarConexion(
+  casoId: string,
+  probeUrl: string
+): Promise<{ ok: boolean; nombreSistema?: string; respuestaPrueba?: unknown; error?: string }> {
+  try {
+    return await req(`/api/casos-de-uso/${casoId}/verificar-conexion`, { method: "POST", body: JSON.stringify({ probeUrl }) });
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : "Error desconocido" };
+  }
+}
+
+export async function estimarCosto(casoId: string, modelos: string[], numCasos?: number): Promise<EstimacionCosto> {
+  const data = await req<{ estimacion: EstimacionCosto }>(`/api/casos-de-uso/${casoId}/estimar-costo`, {
+    method: "POST",
+    body: JSON.stringify({ modelos, numCasos }),
+  });
+  return data.estimacion;
+}
+
+export interface KbDocInput {
+  titulo: string;
+  contenido: string;
+}
+export interface DocumentoExistenteInput {
+  input: unknown;
+  esperado: Record<string, unknown>;
+  camposAmbiguos?: string[];
+}
+
+export async function iniciarCorrida(
+  casoId: string,
+  params: { modelos: string[]; kbDocs?: KbDocInput[]; documentosExistentes?: DocumentoExistenteInput[] }
+): Promise<{ corridaId: string }> {
+  return req(`/api/casos-de-uso/${casoId}/evaluaciones`, { method: "POST", body: JSON.stringify(params) });
+}
+
+export async function obtenerProgreso(casoId: string, corridaId: string): Promise<ProgresoCorrida> {
+  const data = await req<{ progreso: ProgresoCorrida }>(`/api/casos-de-uso/${casoId}/evaluaciones/${corridaId}/progreso`);
+  return data.progreso;
+}
+
+export async function obtenerReporte(casoId: string, corridaId: string): Promise<ReporteEvaluacion> {
+  const data = await req<{ reporte: ReporteEvaluacion }>(`/api/casos-de-uso/${casoId}/evaluaciones/${corridaId}/reporte`);
+  return data.reporte;
 }

@@ -72,8 +72,18 @@ curl -X POST http://localhost:4501/probe/ejecutar \
 
 Cambia `"modelo"` por cualquier id del catálogo (`gpt-4o`, `claude-3-5-sonnet`, `gemini-1-5-flash`, `gpt-4o-mini`, `llama-3-1-70b`, ver `server/src/engine/modelCatalog.ts`) y compara: el `contextoRecuperado` es idéntico entre corridas — solo cambia el modelo y, con él, la respuesta y la latencia.
 
+## Probar el flujo completo (Módulos 1 y 2)
+
+Con `npm run dev` corriendo (server + client + fixtures demo):
+
+1. Abre [http://localhost:5173](http://localhost:5173) → "+ Nuevo caso de uso".
+2. Paso 1: completa nombre/descripción/tipo de tarea/dominio.
+3. Paso 2: conecta `http://localhost:4501` (bot de soporte demo) o `http://localhost:4502` (fraude demo) según el tipo elegido, usa "Usar KB de ejemplo" (o "Usar ejemplos de muestra" si es extracción/clasificación) para no tener que escribir insumos a mano, y elige al menos 2 modelos.
+4. Paso 3: confirma el costo estimado y corre — vas a ver progreso en vivo por modelo.
+5. Reporte: veredicto, tabla comparativa, y la frontera de Pareto costo-vs-precisión.
+
 ## Estado del proyecto
 
-**Fase 1 (esqueleto) completa**: monorepo, SDK `@vectora/probe` (register/wrap funcionales), motor Mock de modelos, Fastify + Prisma + SQLite, seed de "Fintech Andina" (5 casos de uso, historial de evaluación, 200 correcciones de juicio calibradas).
+**Fase 1 (esqueleto) y Fase 2 (Módulos 1 y 2) completas**: monorepo, SDK `@vectora/probe` (register/wrap funcionales), motor Mock de modelos, Fastify + Prisma + SQLite, seed de "Fintech Andina" (5 casos de uso, historial de evaluación, 200 correcciones de juicio calibradas). Motor de evaluación real: agente generador de preguntas desde KB, scoring dual (estructural + juez), orquestador con rate limiting, estimador de costo, y reporte con veredicto + Pareto. UI del stepper de conexión y del reporte, probados de punta a punta en navegador real.
 
-Pendiente (ver DECISIONS.md § Próximas fases): Módulos 1-2 (stepper de conexión + reporte), Módulos 3-4 (calibración del juez + gobernanza), export PDF y `CONNECT-REAL-MODELS.md`.
+Pendiente (ver DECISIONS.md § Próximas fases): Módulos 3-4 (calibración del juez + gobernanza), export PDF real y `CONNECT-REAL-MODELS.md`.
