@@ -1,0 +1,29 @@
+{
+  "name": "vectora",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Vectora: plataforma self-service para evaluar qué LLM conviene por caso de uso",
+  "workspaces": [
+    "probe",
+    "server",
+    "client"
+  ],
+  "scripts": {
+    "build": "npm run build -w @vectora/probe && npm run build -w @vectora/server",
+    "dev:server": "npm run dev -w @vectora/server",
+    "dev:client": "npm run dev -w @vectora/client",
+    "dev:demo-bot": "npm run demo:bot -w @vectora/server",
+    "dev:demo-fraude": "npm run demo:fraude -w @vectora/server",
+    "dev": "npm run build -w @vectora/probe && concurrently -n server,client,demo-bot,demo-fraude -c green,cyan,yellow,magenta \"npm:dev:server\" \"npm:dev:client\" \"npm:dev:demo-bot\" \"npm:dev:demo-fraude\"",
+    "db:push": "npm run db:push -w @vectora/server",
+    "db:seed": "npm run db:seed -w @vectora/server",
+    "setup": "npm install && npm run build -w @vectora/probe && npm run db:push && npm run db:seed"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.0",
+    "typescript": "^5.6.3"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

@@ -1,0 +1,23 @@
+{
+  "name": "@vectora/probe",
+  "version": "0.1.0",
+  "description": "SDK ligero que el cliente instala para exponer su sistema a las evaluaciones activas de Vectora",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "dev": "tsc -p tsconfig.json --watch"
+  },
+  "files": ["dist"],
+  "devDependencies": {
+    "typescript": "^5.6.3",
+    "@types/node": "^22.9.0"
+  }
+}

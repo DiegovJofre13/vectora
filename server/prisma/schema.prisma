@@ -1,0 +1,219 @@
+// Vectora — schema de datos.
+//
+// Nota de diseño: se evita `enum` de Prisma a propósito. El conector sqlite no
+// soporta enums nativos, y este proyecto está pensado para migrar a Postgres
+// más adelante (ver DECISIONS.md) sin fricción — los campos "tipo" quedan como
+// String validados en la capa de aplicación (zod), portable entre ambos.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model Organizacion {
+  id        String   @id @default(cuid())
+  nombre    String
+  createdAt DateTime @default(now())
+
+  casosDeUso         CasoDeUso[]
+  movimientosCredito MovimientoCreditos[]
+}
+
+/// Un caso de uso conectado por un cliente: su sistema, su tipo de tarea, y el
+/// estado de su ciclo evaluación → producción → gobernanza.
+model CasoDeUso {
+  id             String @id @default(cuid())
+  organizacionId String
+  organizacion   Organizacion @relation(fields: [organizacionId], references: [id])
+
+  nombre      String
+  descripcion String
+
+  /// soporte_conversacional | extraccion | clasificacion | rag | generacion
+  tipoTarea String
+
+  /// Derivado de tipoTarea al crear el caso (rag/soporte_conversacional/generacion => true).
+  /// Materializado para no recalcular la heurística en cada query del motor.
+  requiereGenerador Boolean
+
+  /// Dominio para segmentar la calibración del juez (Módulo 3), ej. "soporte_fintech", "legal".
+  dominio String
+
+  /// URL del servidor local que expone @vectora/probe en el sistema del cliente.
+  probeUrl String?
+
+  /// borrador | conectado | evaluado
+  estado String @default("borrador")
+
+  modeloProduccion       String?
+  costoMensualProduccion Float?
+  volumenMensual         Int?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  evaluaciones       EvaluacionCorrida[]
+  correccionesJuicio CorreccionJuicio[]
+  eventosGobernanza  EventoGobernanza[]
+
+  @@index([organizacionId])
+}
+
+/// Una corrida de evaluación: N casos de prueba × M modelos del panel.
+model EvaluacionCorrida {
+  id          String    @id @default(cuid())
+  casoDeUsoId String
+  casoDeUso   CasoDeUso @relation(fields: [casoDeUsoId], references: [id])
+
+  /// Ids del catálogo de modelos incluidos en esta corrida, json-encoded string[].
+  modelosEvaluados String
+
+  /// pendiente | corriendo | completado | error
+  estado String @default("pendiente")
+
+  costoEstimadoUsd Float?
+  costoRealUsd     Float?
+  numCasos         Int
+
+  createdAt   DateTime  @default(now())
+  completedAt DateTime?
+
+  casosPrueba CasoPrueba[]
+
+  @@index([casoDeUsoId])
+}
+
+/// Un caso de prueba puntual (una pregunta, o un documento existente a procesar).
+model CasoPrueba {
+  id                  String            @id @default(cuid())
+  evaluacionCorridaId String
+  evaluacionCorrida   EvaluacionCorrida @relation(fields: [evaluacionCorridaId], references: [id])
+
+  /// json-encoded: la pregunta (string) o el documento/input existente (object).
+  input String
+
+  /// simple | multi_hop | razonamiento — solo aplica a conversacional/RAG.
+  dificultad String?
+
+  /// Respuesta esperada generada por el agente generador a partir del knowledge base.
+  /// Es referencia PROVISIONAL: se valida con humano en el Módulo 3.
+  respuestaEsperadaProvisional String?
+
+  /// true = generado por el agente generador; false = documento real del cliente (extracción/clasificación).
+  esSintetico Boolean @default(true)
+
+  /// Chunk del knowledge base que originó este caso, si el tipo de tarea lo generó.
+  contextoFuente String?
+
+  resultados ResultadoModelo[]
+
+  @@index([evaluacionCorridaId])
+}
+
+/// El resultado de correr UN caso de prueba con UN modelo del panel.
+model ResultadoModelo {
+  id           String     @id @default(cuid())
+  casoPruebaId String
+  casoPrueba   CasoPrueba @relation(fields: [casoPruebaId], references: [id])
+
+  /// Id del modelo en el catálogo (ej. "gpt-4o-mini").
+  modelo String
+
+  /// json-encoded: string u objeto estructurado, según el tipo de tarea.
+  respuesta String
+
+  /// json-encoded, si el caso hace retrieval.
+  contextoRecuperado String?
+
+  latenciaMs       Int
+  costoEstimadoUsd Float
+
+  /// Scoring estructural (extracción/clasificación): 0-1, campo por campo promediado.
+  scoreEstructural Float?
+
+  /// Scoring por juez LLM (conversacional/RAG): 0-1 cada criterio.
+  scoreGroundedness Float?
+  scoreRelevancia   Float?
+  scoreCompletitud  Float?
+  scorePromedio     Float?
+
+  /// Confianza del juez en su propio veredicto (0-1). < 0.65 entra a calibración (Módulo 3).
+  confianzaJuez Float?
+
+  createdAt DateTime @default(now())
+
+  @@index([casoPruebaId])
+  @@index([modelo])
+}
+
+/// Corrección humana de un juicio de baja confianza. Es el dato propietario del
+/// foso: alimenta la calibración del juez y, a futuro, fine-tuning.
+/// Nombres de campo alineados 1:1 al contrato pedido (ver DECISIONS.md):
+/// useCase→casoDeUsoId, domain→dominio, question→question, context→context,
+/// systemAnswer→systemAnswer, provisionalExpected→provisionalExpected,
+/// judgeVerdict→judgeVerdict, humanVerdict→humanVerdict, confidence→confidence, timestamp→timestamp.
+model CorreccionJuicio {
+  id          String    @id @default(cuid())
+  casoDeUsoId String
+  casoDeUso   CasoDeUso @relation(fields: [casoDeUsoId], references: [id])
+
+  dominio             String
+  question            String
+  context             String
+  systemAnswer        String
+  provisionalExpected String
+
+  /// json-encoded: { veredicto, groundedness, relevancia, completitud }
+  judgeVerdict String
+
+  /// null hasta que un humano calibra. "correcta" | "corregida"
+  humanVerdict String?
+  /// Texto corregido por el humano, solo si humanVerdict = "corregida".
+  correctedAnswer String?
+
+  confidence Float
+  timestamp  DateTime @default(now())
+
+  @@index([casoDeUsoId])
+  @@index([dominio])
+}
+
+/// Historial de gobernanza: alertas por evento ("salió un modelo nuevo") y su
+/// resultado, incluyendo los eventos que NO generaron cambio.
+model EventoGobernanza {
+  id          String    @id @default(cuid())
+  casoDeUsoId String
+  casoDeUso   CasoDeUso @relation(fields: [casoDeUsoId], references: [id])
+
+  /// nuevo_modelo | reevaluacion_programada | reevaluacion_manual
+  tipo        String
+  descripcion String
+  huboImpacto Boolean
+
+  /// json-encoded, detalle libre (ej. modelo nuevo, deltas de score/costo).
+  detalle String?
+
+  createdAt DateTime @default(now())
+
+  @@index([casoDeUsoId])
+}
+
+/// Ledger de pago por uso. Unidad = una corrida (un caso de uso × un panel).
+model MovimientoCreditos {
+  id                  String       @id @default(cuid())
+  organizacionId      String
+  organizacion        Organizacion @relation(fields: [organizacionId], references: [id])
+  evaluacionCorridaId String?
+
+  creditosConsumidos Int
+  costoUsd           Float
+  descripcion        String
+
+  createdAt DateTime @default(now())
+
+  @@index([organizacionId])
+}
