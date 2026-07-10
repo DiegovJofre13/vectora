@@ -25,7 +25,7 @@ export default function App() {
 
   return (
     <div className="min-h-screen">
-      <header className="border-b border-linea bg-superficie">
+      <header className="border-b border-linea bg-superficie print:hidden">
         <div className="mx-auto flex max-w-5xl items-center gap-2 px-6 py-4">
           <button className="flex items-center gap-2" onClick={() => setVista({ tipo: "lista" })}>
             <CompassIcon size={22} className="text-marca" />
@@ -58,7 +58,14 @@ export default function App() {
             onCompletado={(casoId, corridaId) => setVista({ tipo: "reporte", casoId, corridaId })}
           />
         )}
-        {vista.tipo === "reporte" && <Reporte casoId={vista.casoId} corridaId={vista.corridaId} onVolver={() => setVista({ tipo: "lista" })} />}
+        {vista.tipo === "reporte" && (
+          <Reporte
+            casoId={vista.casoId}
+            corridaId={vista.corridaId}
+            onVolver={() => setVista({ tipo: "lista" })}
+            onIrAGobernanza={() => setVista({ tipo: "gobernanza" })}
+          />
+        )}
         {vista.tipo === "calibracion" && <Calibracion />}
         {vista.tipo === "gobernanza" && <Gobernanza />}
       </main>

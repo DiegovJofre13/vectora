@@ -7,3 +7,18 @@
     @apply bg-fondo text-tinta font-sans antialiased;
   }
 }
+
+@media print {
+  body {
+    background: #fff;
+  }
+  .shadow-sutil {
+    box-shadow: none !important;
+  }
+  .rounded-card {
+    break-inside: avoid;
+  }
+  table {
+    break-inside: avoid;
+  }
+}

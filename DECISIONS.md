@@ -113,5 +113,25 @@ El contexto recuperado se guarda como JSON (`[{id, titulo, contenido}]`) para qu
 ### Verificación visual encontró un bug real: POST sin body + `content-type: application/json`
 El botón "Simular modelo nuevo" no mandaba body (no lo necesita), pero el cliente HTTP (`lib/api.ts::req`) siempre setea `content-type: application/json`. Fastify rechaza esa combinación (`FST_ERR_CTP_EMPTY_JSON_BODY`) — el botón fallaba en silencio en el primer clic real desde el navegador (curl con `-d` sí manda body, por eso no apareció en las pruebas de backend). Se arregló mandando `body: "{}"`. Un recordatorio de por qué la verificación en navegador real importa más que solo probar el backend con curl.
 
-## Próximas fases
-- **Fase 4**: export PDF real (hoy es `window.print()`), estados vacíos/errores, `CONNECT-REAL-MODELS.md`.
+## Fase 4 — Pulido
+
+### `CONNECT-REAL-MODELS.md`: el punto de contacto real está fuera de Vectora
+Documentar "cómo pasar a modelos reales" obligó a ser explícito sobre algo que el diseño ya daba por sentado: Vectora **nunca** llama a un modelo. La única llamada real vive dentro del sistema del cliente, en el callback de `probe.wrap`. Para el caso común (un cliente conectando su propio sistema), no hay ningún cambio que hacer en el código de Vectora — el documento tuvo que aclarar esto primero, antes de entrar en los cambios opcionales (fixtures demo con modelos reales, juez LLM real, generador con LLM real, costos con uso real de tokens). Ver `CONNECT-REAL-MODELS.md`.
+
+### Export PDF: `window.print()` + CSS de impresión, no un renderer server-side
+Se consideró generar el PDF en el server (ej. con Puppeteer) para tener control total del layout, pero eso agrega una dependencia pesada (un Chromium embebido) solo para un botón. `window.print()` del navegador **ya produce un PDF real** cuando el usuario elige "Guardar como PDF" — el trabajo real fue agregar una hoja de estilos `@media print` (clase `print:hidden` de Tailwind en el header/nav/botones, un encabezado propio solo-para-impresión con marca y fecha ya que el header normal se oculta, `break-inside: avoid` en tarjetas y tabla para que no se corten a la mitad entre páginas). Verificado con `page.pdf()` de Playwright: genera un PDF real de ~300KB con el layout esperado.
+
+### Estados vacíos y de error: auditoría sistemática, no solo el caso feliz
+Se revisaron las 6 páginas del client buscando specifically **promesas sin `.catch`** (quedan como "cargando" para siempre si la request falla) y **colecciones sin mensaje cuando vienen vacías** (se renderiza una tabla con solo encabezados, sin explicar por qué no hay filas). Se encontraron y corrigieron 3 casos reales: el catálogo de modelos y el costo inicial en el stepper (Paso 2 y 3) no capturaban errores de red, y la tabla de gobernanza no tenía mensaje para cuando no hay casos de uso todavía. En el server se agregaron chequeos de existencia antes de escribir (`verificar-conexión` sobre un caso inexistente, `organizacionId` inválido al crear un caso) en vez de dejar que Prisma tire un error genérico sin capturar.
+
+### Onboarding realmente vacío: se probó de verdad, vaciando la base
+El spec pide "un cliente nuevo puede instalar el probe, declarar sus ganchos, conectar su primer caso y correr una evaluación" — sin datos sembrados. Encontramos que faltaba una pieza real: no existía forma de crear una `Organizacion` desde la UI, así que un deploy sin seed se habría quedado bloqueado en el paso 1 del stepper ("No hay ninguna organización configurada"). Se agregó `POST /api/organizaciones` y el stepper ahora auto-provisiona "Mi organización" la primera vez que no encuentra ninguna. Esto se verificó vaciando la base de datos por completo (no editando código para simularlo) y recorriendo lista vacía → gobernanza vacía → calibración vacía → crear el primer caso de uso desde cero.
+
+### El gráfico de Pareto necesitó una segunda pasada de colisión de labels
+La verificación visual de la Fase 2 ya había arreglado una superposición de labels (alternando arriba/abajo por orden de costo). En la Fase 4, con un panel de 4 modelos reales, apareció una colisión distinta: el label de un modelo barato con precisión cercana a una marca del eje (25/50/75/100%) quedaba encima del número del eje — el algoritmo de colisión conocía las posiciones de los demás labels de puntos, pero no las de los ticks del eje Y. Se corrigió sembrando el set de "posiciones ya ocupadas" con los 5 ticks del eje antes de colocar los labels de los puntos, reusando el mismo mecanismo de colisión en vez de agregar un caso especial. Confirma el patrón general: en un componente con pocos elementos (≤5 puntos), colisión por fuerza bruta contra todo lo que ya está en el lienzo es más robusto que alternar por una sola heurística (orden de costo, en este caso) que solo cubre un tipo de choque.
+
+## Estado del proyecto
+
+Las 4 fases del plan original están completas: esqueleto, conectar y evaluar (Módulos 1-2), el foso (Módulos 3-4), y pulido. El producto corre de punta a punta contra el motor Mock, probado en navegador real en cada fase (no solo con curl). Los puntos de extensión hacia producción real quedan documentados en `CONNECT-REAL-MODELS.md`: son cambios localizados (una función a la vez), no un rediseño.
+
+Ideas para después de este MVP, sin comprometerse a ninguna: multi-tenancy real en la UI (hoy todo corre contra una sola organización implícita), fine-tuning del juez a partir de las correcciones de `CorreccionJuicio`, y programar re-evaluaciones por calendario además de por evento.

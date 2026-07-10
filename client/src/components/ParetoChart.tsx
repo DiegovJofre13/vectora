@@ -77,35 +77,45 @@ export function ParetoChart({ puntos, nombresPorModelo }: Props) {
           />
         )}
 
-        {/* Puntos — labels alternados arriba/abajo (en orden de costo) para evitar que se encimen cuando dos modelos quedan cerca en el eje x. */}
-        {puntos
-          .slice()
-          .sort((a, b) => a.costoPor1KUsd - b.costoPor1KUsd)
-          .map((p, i) => {
-            const color = p.esRecomendado ? "#1f6b52" : p.esFrontera ? "#3a6b8a" : "#14201c";
-            const opacidad = p.esRecomendado || p.esFrontera ? 1 : 0.45;
-            const radio = p.esRecomendado ? 8 : 6;
-            const labelArriba = i % 2 === 0;
-            return (
-              <g key={p.modelo}>
-                <circle cx={x(p.costoPor1KUsd)} cy={y(p.precision)} r={radio} fill={color} fillOpacity={opacidad} stroke="#f6f4ee" strokeWidth={2}>
-                  <title>
-                    {nombresPorModelo[p.modelo] ?? p.modelo}: {(p.precision * 100).toFixed(1)}% precisión, ${p.costoPor1KUsd}/1K
-                  </title>
-                </circle>
-                <text
-                  x={x(p.costoPor1KUsd)}
-                  y={labelArriba ? y(p.precision) - radio - 6 : y(p.precision) + radio + 14}
-                  textAnchor="middle"
-                  fontSize={10}
-                  className="fill-tinta"
-                  fontWeight={p.esRecomendado ? 600 : 400}
-                >
-                  {nombresPorModelo[p.modelo] ?? p.modelo}
-                </text>
-              </g>
-            );
-          })}
+        {/* Puntos — la posición del label (arriba/abajo) se decide evitando los ya colocados,
+            no solo alternando por orden: dos modelos con precisión parecida (aunque su costo
+            difiera) quedan a alturas de píxel cercanas y sus labels chocan si solo alternamos
+            por costo. */}
+        {(() => {
+          const puntosPx = puntos.map((p) => ({ p, px: x(p.costoPor1KUsd), py: y(p.precision) }));
+          const DIST_MIN_X = 70;
+          const DIST_MIN_Y = 18;
+          // Se siembra con las posiciones de los ticks del eje Y: si no, un punto barato con precisión
+          // cercana a un 25/50/75/100% termina con su label encima del número del eje.
+          const colocados: { px: number; py: number }[] = gridY.map((g) => ({ px: MARGEN.left - 8, py: y(g) }));
+
+          return puntosPx
+            .slice()
+            .sort((a, b) => a.px - b.px)
+            .map(({ p, px, py }) => {
+              const radio = p.esRecomendado ? 8 : 6;
+              const candidatoArriba = py - radio - 6;
+              const chocaArriba = colocados.some((c) => Math.abs(c.px - px) < DIST_MIN_X && Math.abs(c.py - candidatoArriba) < DIST_MIN_Y);
+              const labelY = chocaArriba ? py + radio + 14 : candidatoArriba;
+              colocados.push({ px, py: labelY });
+
+              const color = p.esRecomendado ? "#1f6b52" : p.esFrontera ? "#3a6b8a" : "#14201c";
+              const opacidad = p.esRecomendado || p.esFrontera ? 1 : 0.45;
+
+              return (
+                <g key={p.modelo}>
+                  <circle cx={px} cy={py} r={radio} fill={color} fillOpacity={opacidad} stroke="#f6f4ee" strokeWidth={2}>
+                    <title>
+                      {nombresPorModelo[p.modelo] ?? p.modelo}: {(p.precision * 100).toFixed(1)}% precisión, ${p.costoPor1KUsd}/1K
+                    </title>
+                  </circle>
+                  <text x={px} y={labelY} textAnchor="middle" fontSize={10} className="fill-tinta" fontWeight={p.esRecomendado ? 600 : 400}>
+                    {nombresPorModelo[p.modelo] ?? p.modelo}
+                  </text>
+                </g>
+              );
+            });
+        })()}
       </svg>
       <div className="mt-2 flex flex-wrap gap-4 text-xs text-tinta/60">
         <span className="flex items-center gap-1.5">

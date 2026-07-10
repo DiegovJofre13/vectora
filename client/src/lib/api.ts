@@ -108,6 +108,11 @@ export async function listarOrganizaciones(): Promise<Organizacion[]> {
   return data.organizaciones;
 }
 
+export async function crearOrganizacion(nombre: string): Promise<Organizacion> {
+  const data = await req<{ organizacion: Organizacion }>("/api/organizaciones", { method: "POST", body: JSON.stringify({ nombre }) });
+  return data.organizacion;
+}
+
 export async function obtenerCatalogo(): Promise<ModeloCatalogo[]> {
   const data = await req<{ modelos: ModeloCatalogo[] }>("/api/catalogo-modelos");
   return data.modelos;

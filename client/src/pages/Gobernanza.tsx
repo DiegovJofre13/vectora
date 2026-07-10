@@ -78,6 +78,14 @@ export function Gobernanza() {
       {mensajeSimulacion && <div className="mt-4 rounded-card border border-azul/30 bg-azul/5 p-3 text-sm text-azul">{mensajeSimulacion}</div>}
 
       <h2 className="mt-8 font-display text-xl font-medium">Casos de uso en producción</h2>
+
+      {ledger && ledger.length === 0 && (
+        <div className="mt-4 rounded-card border border-dashed border-linea p-10 text-center text-sm text-tinta/60">
+          Todavía no hay casos de uso conectados. Crea uno desde la pestaña "Casos de uso".
+        </div>
+      )}
+
+      {(!ledger || ledger.length > 0) && (
       <div className="mt-4 overflow-x-auto rounded-card border border-linea bg-superficie shadow-sutil">
         <table className="w-full text-sm">
           <thead>
@@ -123,6 +131,7 @@ export function Gobernanza() {
           </tbody>
         </table>
       </div>
+      )}
 
       <h2 className="mt-8 font-display text-xl font-medium">Historial de eventos</h2>
       <div className="mt-4 space-y-2">

@@ -45,13 +45,23 @@ export async function registrarRutasEvaluaciones(app: FastifyInstance): Promise<
     }
   });
 
-  app.get<{ Params: { id: string; corridaId: string } }>("/api/casos-de-uso/:id/evaluaciones/:corridaId/progreso", async (req) => {
-    const progreso = await obtenerProgreso(req.params.corridaId);
-    return { progreso };
+  app.get<{ Params: { id: string; corridaId: string } }>("/api/casos-de-uso/:id/evaluaciones/:corridaId/progreso", async (req, reply) => {
+    try {
+      const progreso = await obtenerProgreso(req.params.corridaId);
+      return { progreso };
+    } catch {
+      reply.code(404);
+      return { ok: false, error: "Corrida no encontrada." };
+    }
   });
 
-  app.get<{ Params: { id: string; corridaId: string } }>("/api/casos-de-uso/:id/evaluaciones/:corridaId/reporte", async (req) => {
-    const reporte = await generarReporte(req.params.corridaId);
-    return { reporte };
+  app.get<{ Params: { id: string; corridaId: string } }>("/api/casos-de-uso/:id/evaluaciones/:corridaId/reporte", async (req, reply) => {
+    try {
+      const reporte = await generarReporte(req.params.corridaId);
+      return { reporte };
+    } catch {
+      reply.code(404);
+      return { ok: false, error: "Corrida no encontrada." };
+    }
   });
 }

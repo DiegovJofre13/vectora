@@ -34,6 +34,11 @@ export async function registrarRutasCasosDeUso(app: FastifyInstance): Promise<vo
       return { ok: false, error: parsed.error.issues.map((i) => i.message).join("; ") };
     }
     const datos = parsed.data;
+    const organizacion = await db.organizacion.findUnique({ where: { id: datos.organizacionId } });
+    if (!organizacion) {
+      reply.code(404);
+      return { ok: false, error: "La organización indicada no existe." };
+    }
     const caso = await db.casoDeUso.create({
       data: {
         organizacionId: datos.organizacionId,
@@ -57,6 +62,12 @@ export async function registrarRutasCasosDeUso(app: FastifyInstance): Promise<vo
       reply.code(400);
       return { ok: false, error: parsed.error.issues.map((i) => i.message).join("; ") };
     }
+    const casoExistente = await db.casoDeUso.findUnique({ where: { id: req.params.id } });
+    if (!casoExistente) {
+      reply.code(404);
+      return { ok: false, error: "Caso de uso no encontrado" };
+    }
+
     const { probeUrl } = parsed.data;
     const base = probeUrl.replace(/\/$/, "");
 

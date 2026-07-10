@@ -2,7 +2,7 @@ import { useState } from "react";
 import { PasoCasoDeUso, type DatosCasoDeUso } from "../components/stepper/PasoCasoDeUso.js";
 import { PasoConectarModelos, type DatosConexionModelos } from "../components/stepper/PasoConectarModelos.js";
 import { PasoCorrer } from "../components/stepper/PasoCorrer.js";
-import { crearCasoDeUso, listarOrganizaciones, type CasoDeUsoResumen } from "../lib/api.js";
+import { crearCasoDeUso, crearOrganizacion, listarOrganizaciones, type CasoDeUsoResumen } from "../lib/api.js";
 
 interface Props {
   onCancelar: () => void;
@@ -23,8 +23,9 @@ export function NuevoCaso({ onCancelar, onCompletado }: Props) {
     setErrorPaso1(null);
     try {
       const organizaciones = await listarOrganizaciones();
-      const organizacionId = organizaciones[0]?.id;
-      if (!organizacionId) throw new Error("No hay ninguna organización configurada.");
+      // Onboarding vacío real: si es la primera vez que se usa Vectora (sin seed), se
+      // provisiona una organización por defecto en vez de bloquear al usuario nuevo.
+      const organizacionId = organizaciones[0]?.id ?? (await crearOrganizacion("Mi organización")).id;
       const nuevoCaso = await crearCasoDeUso({ organizacionId, ...datos });
       setCaso(nuevoCaso);
       setPaso(2);

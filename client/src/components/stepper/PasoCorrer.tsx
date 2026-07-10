@@ -20,7 +20,9 @@ export function PasoCorrer({ casoId, requiereGenerador, datos, onVolver, onCompl
   const numCasos = requiereGenerador ? 30 : Math.max(datos.documentosExistentes?.length ?? 1, 1);
 
   useEffect(() => {
-    estimarCosto(casoId, datos.modelos, numCasos).then(setEstimacion);
+    estimarCosto(casoId, datos.modelos, numCasos)
+      .then(setEstimacion)
+      .catch((err) => setError(err instanceof Error ? err.message : "No se pudo estimar el costo de la corrida."));
     return () => {
       if (intervaloRef.current) clearInterval(intervaloRef.current);
     };

@@ -88,8 +88,10 @@ Con `npm run dev` corriendo (server + client + fixtures demo):
 2. Pestaña "Gobernanza": tarjetas de gasto/ahorro/casos activos, tabla de casos en producción con estado derivado (óptimo / cambio sugerido / evaluación vieja), e historial de eventos.
 3. "Simular modelo nuevo" (habilitado solo en casos con sistema conectado, ej. "Bot de soporte") re-corre de verdad las ~30 preguntas guardadas contra el probe con un modelo del catálogo que aún no se había evaluado — toma ~1 minuto real y alerta solo si la recomendación cambia.
 
+## Pasar a modelos reales
+
+Ver [CONNECT-REAL-MODELS.md](./CONNECT-REAL-MODELS.md) — explica exactamente qué tocar (y qué NO hay que tocar) para que un cliente evalúe con Bedrock/OpenAI/Anthropic/Google reales en vez del motor Mock. Spoiler: en el caso común, no hay que tocar nada de Vectora.
+
 ## Estado del proyecto
 
-**Fases 1 a 3 completas**: monorepo, SDK `@vectora/probe` (register/wrap funcionales), motor Mock de modelos, Fastify + Prisma + SQLite, seed de "Fintech Andina". Motor de evaluación real (agente generador, scoring dual, orquestador con rate limiting, estimador de costo, reporte con veredicto + Pareto). Calibración del juez con cola de baja confianza y contador de acuerdo por dominio. Registro de gobernanza con ledger derivado, tarjetas resumen, y alertas por evento que re-ejecutan el sistema real del cliente. Todo probado de punta a punta en navegador real (Chromium vía Playwright ad hoc).
-
-Pendiente (ver DECISIONS.md § Próximas fases): export PDF real (hoy es `window.print()`), estados vacíos/errores más pulidos, y `CONNECT-REAL-MODELS.md`.
+**Las 4 fases completas**: monorepo, SDK `@vectora/probe` (register/wrap funcionales), motor Mock de modelos, Fastify + Prisma + SQLite, seed de "Fintech Andina". Motor de evaluación real (agente generador, scoring dual, orquestador con rate limiting, estimador de costo, reporte con veredicto + Pareto). Calibración del juez con cola de baja confianza y contador de acuerdo por dominio. Registro de gobernanza con ledger derivado, tarjetas resumen, y alertas por evento que re-ejecutan el sistema real del cliente. Export a PDF real vía impresión del navegador, estados vacíos/de error auditados en las 6 páginas, y onboarding recorrible desde una base de datos completamente vacía (sin depender del seed). Todo probado de punta a punta en navegador real (Chromium vía Playwright ad hoc), no solo con curl.

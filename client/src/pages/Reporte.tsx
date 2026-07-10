@@ -13,9 +13,10 @@ interface Props {
   casoId: string;
   corridaId: string;
   onVolver: () => void;
+  onIrAGobernanza: () => void;
 }
 
-export function Reporte({ casoId, corridaId, onVolver }: Props) {
+export function Reporte({ casoId, corridaId, onVolver, onIrAGobernanza }: Props) {
   const [reporte, setReporte] = useState<ReporteEvaluacion | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -37,9 +38,17 @@ export function Reporte({ casoId, corridaId, onVolver }: Props) {
 
   return (
     <div>
-      <button onClick={onVolver} className="text-sm text-tinta/50 hover:text-tinta">
+      <button onClick={onVolver} className="text-sm text-tinta/50 hover:text-tinta print:hidden">
         ← Volver a casos de uso
       </button>
+
+      {/* Encabezado solo para la versión impresa/PDF, ya que el header con navegación se oculta al imprimir. */}
+      <div className="mb-6 hidden border-b border-linea pb-4 print:block">
+        <p className="font-display text-lg font-medium">Vectora — Reporte de evaluación</p>
+        <p className="text-xs text-tinta/50">
+          Generado el {new Date().toLocaleDateString("es-CL", { day: "2-digit", month: "long", year: "numeric" })}
+        </p>
+      </div>
 
       {reporte.veredicto && (
         <div className="mt-4 rounded-card border border-marca/30 bg-marca-tinte p-6 shadow-sutil">
@@ -124,16 +133,16 @@ export function Reporte({ casoId, corridaId, onVolver }: Props) {
         </div>
       </section>
 
-      <div className="mt-8 flex gap-3">
+      <div className="mt-8 flex gap-3 print:hidden">
         <button onClick={() => window.print()} className="rounded-card border border-linea px-4 py-2 text-sm font-medium hover:border-marca/40">
           Exportar PDF
         </button>
         <button
-          disabled
-          title="Disponible en el módulo de gobernanza (Fase 3)"
-          className="rounded-card border border-linea px-4 py-2 text-sm font-medium text-tinta/40"
+          onClick={onIrAGobernanza}
+          title="Configura alertas por evento para este caso en el módulo de gobernanza"
+          className="rounded-card border border-linea px-4 py-2 text-sm font-medium hover:border-marca/40"
         >
-          Programar re-evaluación por evento
+          Programar re-evaluación por evento →
         </button>
       </div>
     </div>

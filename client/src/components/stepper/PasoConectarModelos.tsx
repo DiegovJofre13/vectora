@@ -56,16 +56,23 @@ export function PasoConectarModelos({ casoId, tipoTarea, requiereGenerador, nomb
   const [sugeridos, setSugeridos] = useState<string[]>([]);
   const [seleccionados, setSeleccionados] = useState<Set<string>>(new Set());
   const [estimacion, setEstimacion] = useState<EstimacionCosto | null>(null);
+  const [errorCatalogo, setErrorCatalogo] = useState<string | null>(null);
 
   const [kbDocs, setKbDocs] = useState<KbDocInput[]>([]);
   const [docsExistentes, setDocsExistentes] = useState<DocExistenteForm[]>([]);
 
   useEffect(() => {
-    obtenerCatalogo().then(setCatalogo);
-    sugerirModelosApi({ tipoTarea, nombre, descripcion, volumenMensual }).then((s) => {
-      setSugeridos(s);
-      setSeleccionados(new Set(s));
-    });
+    obtenerCatalogo()
+      .then(setCatalogo)
+      .catch((err) => setErrorCatalogo(err instanceof Error ? err.message : "No se pudo cargar el catálogo de modelos."));
+    sugerirModelosApi({ tipoTarea, nombre, descripcion, volumenMensual })
+      .then((s) => {
+        setSugeridos(s);
+        setSeleccionados(new Set(s));
+      })
+      .catch(() => {
+        // La sugerencia es un extra de UX, no bloquea el flujo si falla: el usuario igual puede elegir modelos a mano.
+      });
   }, [tipoTarea, nombre, descripcion, volumenMensual]);
 
   const numCasos = requiereGenerador ? 30 : Math.max(docsExistentes.length, 1);
@@ -267,6 +274,7 @@ export function PasoConectarModelos({ casoId, tipoTarea, requiereGenerador, nomb
       <section>
         <h2 className="font-display text-xl font-medium">4. Elige los modelos a comparar</h2>
         <p className="mt-1 text-sm text-tinta/60">Mínimo 2. Los marcados con borde vienen sugeridos para este tipo de caso.</p>
+        {errorCatalogo && <div className="mt-3 rounded-card border border-coral/30 bg-coral/5 p-3 text-sm text-coral">{errorCatalogo}</div>}
         <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2">
           {catalogo.map((m) => {
             const marcado = seleccionados.has(m.id);
