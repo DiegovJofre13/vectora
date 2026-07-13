@@ -282,3 +282,64 @@ export async function obtenerHistorialEventos(): Promise<EventoGobernanza[]> {
 export async function simularEventoNuevoModelo(casoId: string): Promise<{ evento: EventoGobernanza }> {
   return req(`/api/casos-de-uso/${casoId}/eventos/simular-modelo-nuevo`, { method: "POST", body: "{}" });
 }
+
+// --- Detalle de casos: set de pruebas + resultado por modelo ---
+
+export interface DocumentoFuente {
+  id: string;
+  titulo: string;
+  contenido: string;
+}
+
+export interface CampoComparado {
+  clave: string;
+  esperado: string;
+  obtenido: string | null;
+  esAmbiguo: boolean;
+  puntaje: number;
+}
+
+export interface DetalleEstructural {
+  score: number;
+  campos: CampoComparado[];
+  veredicto: "paso" | "fallo";
+  razonamiento: string;
+}
+
+export interface ResultadoDetalle {
+  resultadoId: string;
+  modelo: string;
+  respuesta: unknown;
+  contextoRecuperado: DocumentoFuente[] | unknown;
+  latenciaMs: number;
+  costoEstimadoUsd: number;
+  scoreEstructural: number | null;
+  scoreGroundedness: number | null;
+  scoreRelevancia: number | null;
+  scoreCompletitud: number | null;
+  scorePromedio: number | null;
+  confianzaJuez: number | null;
+  veredictoJuez: "paso" | "fallo" | null;
+  razonamientoJuez: string | null;
+  detalleEstructural: DetalleEstructural | null;
+}
+
+export interface CasoConDetalle {
+  casoPruebaId: string;
+  input: unknown;
+  dificultad: "simple" | "multi_hop" | "razonamiento" | null;
+  esSintetico: boolean;
+  documentosFuente: DocumentoFuente[] | null;
+  respuestaEsperadaProvisional: string | null;
+  resultados: ResultadoDetalle[];
+}
+
+export interface CasosConDetalleRespuesta {
+  requiereJuez: boolean;
+  numModelos: number;
+  casos: CasoConDetalle[];
+}
+
+export async function obtenerCasosDetalle(casoId: string, corridaId: string): Promise<CasosConDetalleRespuesta> {
+  return req(`/api/casos-de-uso/${casoId}/evaluaciones/${corridaId}/casos`);
+}

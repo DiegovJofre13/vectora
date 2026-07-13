@@ -8,11 +8,13 @@ interface Props {
   datos: DatosConexionModelos;
   onVolver: () => void;
   onCompletado: (corridaId: string) => void;
+  onVerCasos: (corridaId: string) => void;
 }
 
-export function PasoCorrer({ casoId, requiereGenerador, datos, onVolver, onCompletado }: Props) {
+export function PasoCorrer({ casoId, requiereGenerador, datos, onVolver, onCompletado, onVerCasos }: Props) {
   const [estimacion, setEstimacion] = useState<EstimacionCosto | null>(null);
   const [corriendo, setCorriendo] = useState(false);
+  const [corridaId, setCorridaId] = useState<string | null>(null);
   const [progreso, setProgreso] = useState<ProgresoCorrida | null>(null);
   const [error, setError] = useState<string | null>(null);
   const intervaloRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -33,14 +35,15 @@ export function PasoCorrer({ casoId, requiereGenerador, datos, onVolver, onCompl
     setCorriendo(true);
     setError(null);
     try {
-      const { corridaId } = await iniciarCorrida(casoId, datos);
+      const { corridaId: nuevaCorridaId } = await iniciarCorrida(casoId, datos);
+      setCorridaId(nuevaCorridaId);
       intervaloRef.current = setInterval(async () => {
         try {
-          const p = await obtenerProgreso(casoId, corridaId);
+          const p = await obtenerProgreso(casoId, nuevaCorridaId);
           setProgreso(p);
           if (p.estado === "completado") {
             if (intervaloRef.current) clearInterval(intervaloRef.current);
-            onCompletado(corridaId);
+            onCompletado(nuevaCorridaId);
           } else if (p.estado === "error") {
             if (intervaloRef.current) clearInterval(intervaloRef.current);
             setError("La corrida terminó con errores. Revisa la conexión con tu sistema.");
@@ -111,6 +114,11 @@ export function PasoCorrer({ casoId, requiereGenerador, datos, onVolver, onCompl
             ))}
           </div>
           <p className="mt-3 text-xs text-tinta/50">Ejerciendo tu sistema real vía el probe, con casos {requiereGenerador ? "sintéticos" : "reales"}.</p>
+          {corridaId && (
+            <button onClick={() => onVerCasos(corridaId)} className="mt-3 text-xs font-medium text-marca hover:underline">
+              Ver el set de casos generado (no hace falta esperar a que termine) →
+            </button>
+          )}
         </div>
       )}
 

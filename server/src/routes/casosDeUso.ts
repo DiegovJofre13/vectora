@@ -26,6 +26,15 @@ const estimarCostoSchema = z.object({
   numCasos: z.number().int().positive().optional(),
 });
 
+/** Timeout corto: verificar conexión debe ser rápido, es un chequeo antes de gastar una corrida completa. */
+const TIMEOUT_VERIFICACION_MS = 10_000;
+
+function fetchConTimeout(url: string, init: RequestInit = {}, timeoutMs = TIMEOUT_VERIFICACION_MS): Promise<Response> {
+  const controlador = new AbortController();
+  const timeoutId = setTimeout(() => controlador.abort(), timeoutMs);
+  return fetch(url, { ...init, signal: controlador.signal }).finally(() => clearTimeout(timeoutId));
+}
+
 export async function registrarRutasCasosDeUso(app: FastifyInstance): Promise<void> {
   app.post("/api/casos-de-uso", async (req, reply) => {
     const parsed = crearCasoSchema.safeParse(req.body);
@@ -72,14 +81,14 @@ export async function registrarRutasCasosDeUso(app: FastifyInstance): Promise<vo
     const base = probeUrl.replace(/\/$/, "");
 
     try {
-      const saludRes = await fetch(`${base}/probe/salud`);
+      const saludRes = await fetchConTimeout(`${base}/probe/salud`);
       const salud = (await saludRes.json()) as { ok: boolean; registrado: boolean; nombreSistema?: string };
       if (!salud.ok || !salud.registrado) {
         reply.code(422);
         return { ok: false, error: "El probe respondió pero no tiene ninguna función registrada (probe.register(fn))." };
       }
 
-      const ejecutarRes = await fetch(`${base}/probe/ejecutar`, {
+      const ejecutarRes = await fetchConTimeout(`${base}/probe/ejecutar`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ input: "prueba de conexión de Vectora", modelo: "gpt-4o-mini" }),
@@ -94,7 +103,13 @@ export async function registrarRutasCasosDeUso(app: FastifyInstance): Promise<vo
       return { ok: true, nombreSistema: salud.nombreSistema, respuestaPrueba: ejecutar.respuesta };
     } catch (err) {
       reply.code(422);
-      return { ok: false, error: `No se pudo conectar a ${probeUrl}: ${err instanceof Error ? err.message : "error desconocido"}` };
+      const esTimeout = err instanceof Error && err.name === "AbortError";
+      return {
+        ok: false,
+        error: esTimeout
+          ? `${probeUrl} no respondió dentro de ${TIMEOUT_VERIFICACION_MS / 1000}s (timeout).`
+          : `No se pudo conectar a ${probeUrl}: ${err instanceof Error ? err.message : "error desconocido"}`,
+      };
     }
   });
 

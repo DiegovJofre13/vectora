@@ -18,6 +18,8 @@ import {
   sintetizarRespuestaSeed,
   sintetizarScoresJuez,
   sintetizarConfianzaJuez,
+  sintetizarVeredictoJuez,
+  sintetizarCamposEstructural,
   latenciaConJitter,
   costoEstimado,
   type PreguntaSeed,
@@ -87,7 +89,7 @@ async function sembrarEvaluacionRag(opts: CasoRagOpts) {
         dificultad: preg.dificultad,
         respuestaEsperadaProvisional: preg.respuestaEsperadaProvisional,
         esSintetico: true,
-        contextoFuente: docs.map((d) => d.id).join(","),
+        contextoFuente: JSON.stringify(docs.map((d) => ({ id: d.id, titulo: d.titulo, contenido: d.contenido }))),
       },
     });
 
@@ -96,6 +98,7 @@ async function sembrarEvaluacionRag(opts: CasoRagOpts) {
       if (!modelo) continue;
       const { texto, acierto } = sintetizarRespuestaSeed(rng, modelo.tier, preg);
       const scores = sintetizarScoresJuez(rng, modelo.tier, acierto);
+      const { veredicto, razonamiento } = sintetizarVeredictoJuez(scores, acierto);
       const forzarBaja = opts.indicesBajaConfianza.includes(i) && m === i % opts.modelos.length;
       const confianza = sintetizarConfianzaJuez(rng, forzarBaja);
       const latencia = latenciaConJitter(rng, modelo.latenciaBaseMs);
@@ -115,6 +118,8 @@ async function sembrarEvaluacionRag(opts: CasoRagOpts) {
           scoreCompletitud: scores.completitud,
           scorePromedio: scores.promedio,
           confianzaJuez: confianza,
+          veredictoJuez: veredicto,
+          razonamientoJuez: razonamiento,
           createdAt: diasAtras(opts.completadaHaceDias),
         },
       });
@@ -163,9 +168,23 @@ async function sembrarEvaluacionEstructural(opts: CasoEstructuralOpts) {
     });
 
     for (const modelo of opts.modelos) {
-      const base = probScoreEstructural[modelo.tier];
-      const scoreEstructural = Number(Math.max(0, Math.min(1, base + (rng() - 0.5) * 0.15)).toFixed(3));
-      const respuestaTexto = JSON.stringify({ campo1: "valor-extraido", campo2: "valor-extraido-2" });
+      const probCorrecto = probScoreEstructural[modelo.tier];
+      const { campo1, campo2, score: scoreEstructural } = sintetizarCamposEstructural(rng, probCorrecto);
+      const obtenido1 = campo1 === 1 ? "valor-esperado-1" : "valor-extraido";
+      const obtenido2 = campo2 === 1 ? "valor-esperado-2" : "valor-extraido-2";
+      const respuestaTexto = JSON.stringify({ campo1: obtenido1, campo2: obtenido2 });
+      const detalleEstructural = {
+        score: scoreEstructural,
+        campos: [
+          { clave: "campo1", esperado: "valor-esperado-1", obtenido: obtenido1, esAmbiguo: false, puntaje: campo1 },
+          { clave: "campo2", esperado: "valor-esperado-2", obtenido: obtenido2, esAmbiguo: false, puntaje: campo2 },
+        ],
+        veredicto: scoreEstructural >= 0.75 ? "paso" : "fallo",
+        razonamiento:
+          campo1 === 1 && campo2 === 1
+            ? "Todos los campos coinciden con lo esperado."
+            : `No coincide${campo1 === 0 && campo2 === 0 ? "n" : ""}: ${[campo1 === 0 ? "campo1" : null, campo2 === 0 ? "campo2" : null].filter(Boolean).join(", ")}.`,
+      };
       const latencia = latenciaConJitter(rng, modelo.latenciaBaseMs);
       const costo = costoEstimado(modelo, JSON.stringify(inputSintetico), respuestaTexto);
       costoTotal += costo;
@@ -178,6 +197,7 @@ async function sembrarEvaluacionEstructural(opts: CasoEstructuralOpts) {
           latenciaMs: latencia,
           costoEstimadoUsd: costo,
           scoreEstructural,
+          detalleEstructural: JSON.stringify(detalleEstructural),
           createdAt: diasAtras(opts.completadaHaceDias),
         },
       });

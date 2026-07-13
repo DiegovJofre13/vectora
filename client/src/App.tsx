@@ -5,11 +5,13 @@ import { NuevoCaso } from "./pages/NuevoCaso.js";
 import { Reporte } from "./pages/Reporte.js";
 import { Calibracion } from "./pages/Calibracion.js";
 import { Gobernanza } from "./pages/Gobernanza.js";
+import { DetalleCasos } from "./pages/DetalleCasos.js";
 
 export type Vista =
   | { tipo: "lista" }
   | { tipo: "nuevo" }
   | { tipo: "reporte"; casoId: string; corridaId: string }
+  | { tipo: "detalle-casos"; casoId: string; corridaId: string }
   | { tipo: "calibracion" }
   | { tipo: "gobernanza" };
 
@@ -21,19 +23,21 @@ const TABS: { tipo: "lista" | "calibracion" | "gobernanza"; etiqueta: string }[]
 
 export default function App() {
   const [vista, setVista] = useState<Vista>({ tipo: "lista" });
-  const tabActivo = vista.tipo === "reporte" || vista.tipo === "nuevo" ? "lista" : vista.tipo;
+  const tabActivo = vista.tipo === "reporte" || vista.tipo === "nuevo" || vista.tipo === "detalle-casos" ? "lista" : vista.tipo;
+  // El panel de detalle por caso muestra tarjetas lado a lado por modelo — necesita más ancho que el resto de la app.
+  const anchoMax = vista.tipo === "detalle-casos" ? "max-w-7xl" : "max-w-5xl";
 
   return (
     <div className="min-h-screen">
       <header className="border-b border-linea bg-superficie print:hidden">
-        <div className="mx-auto flex max-w-5xl items-center gap-2 px-6 py-4">
+        <div className={`mx-auto flex ${anchoMax} items-center gap-2 px-6 py-4`}>
           <button className="flex items-center gap-2" onClick={() => setVista({ tipo: "lista" })}>
             <CompassIcon size={22} className="text-marca" />
             <span className="font-display text-lg font-medium tracking-tight">Vectora</span>
           </button>
           <span className="ml-2 text-sm text-tinta/50">qué modelo conviene, con evidencia</span>
         </div>
-        <nav className="mx-auto flex max-w-5xl gap-1 px-6">
+        <nav className={`mx-auto flex ${anchoMax} gap-1 px-6`}>
           {TABS.map((t) => (
             <button
               key={t.tipo}
@@ -48,7 +52,7 @@ export default function App() {
         </nav>
       </header>
 
-      <main className="mx-auto max-w-5xl px-6 py-10">
+      <main className={`mx-auto ${anchoMax} px-6 py-10`}>
         {vista.tipo === "lista" && (
           <ListaCasos onNuevoCaso={() => setVista({ tipo: "nuevo" })} onVerReporte={(casoId, corridaId) => setVista({ tipo: "reporte", casoId, corridaId })} />
         )}
@@ -56,6 +60,7 @@ export default function App() {
           <NuevoCaso
             onCancelar={() => setVista({ tipo: "lista" })}
             onCompletado={(casoId, corridaId) => setVista({ tipo: "reporte", casoId, corridaId })}
+            onVerCasos={(casoId, corridaId) => setVista({ tipo: "detalle-casos", casoId, corridaId })}
           />
         )}
         {vista.tipo === "reporte" && (
@@ -64,7 +69,11 @@ export default function App() {
             corridaId={vista.corridaId}
             onVolver={() => setVista({ tipo: "lista" })}
             onIrAGobernanza={() => setVista({ tipo: "gobernanza" })}
+            onVerDetalleCasos={() => setVista({ tipo: "detalle-casos", casoId: vista.casoId, corridaId: vista.corridaId })}
           />
+        )}
+        {vista.tipo === "detalle-casos" && (
+          <DetalleCasos casoId={vista.casoId} corridaId={vista.corridaId} onVolver={() => setVista({ tipo: "reporte", casoId: vista.casoId, corridaId: vista.corridaId })} />
         )}
         {vista.tipo === "calibracion" && <Calibracion />}
         {vista.tipo === "gobernanza" && <Gobernanza />}

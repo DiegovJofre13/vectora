@@ -2,11 +2,14 @@ import { db } from "../lib/db.js";
 import { crearLimitador } from "../lib/pLimit.js";
 import { generarPreguntas, type DocumentoKbInput } from "./generatorAgent.js";
 import { juzgar } from "./judge.js";
-import { scoreEstructural } from "./structuralScoring.js";
+import { scoreEstructuralConDetalle } from "./structuralScoring.js";
 import { estimarCostoUsd } from "./mockModelEngine.js";
 import { estrategiaScoringParaTipo, type TipoTarea } from "./taskTypes.js";
 
 const CONCURRENCIA_MAXIMA = 4;
+/** Timeout por llamada al probe del cliente. Sin esto, un sistema real lento o colgado
+ * ocupa para siempre uno de los 4 cupos de concurrencia y la corrida nunca termina. */
+const TIMEOUT_PROBE_MS = 60_000;
 
 export interface DocumentoExistenteInsumo {
   input?: unknown;
@@ -62,7 +65,7 @@ export async function iniciarCorrida(
         dificultad: p.dificultad,
         respuestaEsperadaProvisional: p.respuestaEsperadaProvisional,
         esSintetico: true,
-        contextoFuente: p.contextoFuenteIds.join(","),
+        contextoFuente: JSON.stringify(p.documentosFuente),
       }))
     : (insumos.documentosExistentes ?? []).map((d) => ({
         input: JSON.stringify({ documento: d.input, esperado: d.esperado, camposAmbiguos: d.camposAmbiguos } satisfies EnvolturaEstructural),
@@ -105,17 +108,25 @@ async function llamarProbe(
   probeUrl: string,
   body: { input: unknown; modelo: string; casoUsoId?: string; casoPruebaId?: string }
 ): Promise<{ ok: true; respuesta: unknown; contextoRecuperado?: unknown; latenciaMs: number } | { ok: false; error: string }> {
+  const controlador = new AbortController();
+  const timeoutId = setTimeout(() => controlador.abort(), TIMEOUT_PROBE_MS);
   try {
     const res = await fetch(`${probeUrl.replace(/\/$/, "")}/probe/ejecutar`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify(body),
+      signal: controlador.signal,
     });
     const data = (await res.json()) as { ok: boolean; error?: string; respuesta?: unknown; contextoRecuperado?: unknown; latenciaMs?: number };
     if (!data.ok) return { ok: false, error: data.error ?? "El sistema del cliente devolvió un error." };
     return { ok: true, respuesta: data.respuesta, contextoRecuperado: data.contextoRecuperado, latenciaMs: data.latenciaMs ?? 0 };
   } catch (err) {
+    if (err instanceof Error && err.name === "AbortError") {
+      return { ok: false, error: `El sistema del cliente no respondió dentro de ${TIMEOUT_PROBE_MS / 1000}s (timeout).` };
+    }
     return { ok: false, error: err instanceof Error ? err.message : "No se pudo contactar al sistema del cliente." };
+  } finally {
+    clearTimeout(timeoutId);
   }
 }
 
@@ -154,6 +165,9 @@ export async function ejecutarCorridaParaGobernanza(corridaId: string, probeUrl:
                 scoreEstructural: requiereJuez ? null : 0,
                 scorePromedio: requiereJuez ? 0 : null,
                 confianzaJuez: requiereJuez ? 0.15 : null,
+                veredictoJuez: requiereJuez ? "fallo" : null,
+                razonamientoJuez: requiereJuez ? `El sistema del cliente devolvió un error, no se pudo juzgar: ${resultado.error}` : null,
+                detalleEstructural: requiereJuez ? null : JSON.stringify({ error: resultado.error }),
               },
             });
             return;
@@ -189,10 +203,14 @@ export async function ejecutarCorridaParaGobernanza(corridaId: string, probeUrl:
                 scoreCompletitud: veredicto.completitud,
                 scorePromedio: veredicto.promedio,
                 confianzaJuez: veredicto.confianza,
+                veredictoJuez: veredicto.veredicto,
+                razonamientoJuez: veredicto.razonamiento,
               },
             });
           } else {
-            const score = envoltura ? scoreEstructural(resultado.respuesta, { camposEsperados: envoltura.esperado, camposAmbiguos: envoltura.camposAmbiguos }) : 0;
+            const detalle = envoltura
+              ? scoreEstructuralConDetalle(resultado.respuesta, { camposEsperados: envoltura.esperado, camposAmbiguos: envoltura.camposAmbiguos })
+              : { score: 0, campos: [], veredicto: "fallo" as const, razonamiento: "No se pudo interpretar el documento de entrada." };
             await db.resultadoModelo.create({
               data: {
                 casoPruebaId: casoPrueba.id,
@@ -200,7 +218,8 @@ export async function ejecutarCorridaParaGobernanza(corridaId: string, probeUrl:
                 respuesta: JSON.stringify(resultado.respuesta),
                 latenciaMs: resultado.latenciaMs,
                 costoEstimadoUsd,
-                scoreEstructural: score,
+                scoreEstructural: detalle.score,
+                detalleEstructural: JSON.stringify(detalle),
               },
             });
           }

@@ -14,9 +14,10 @@ interface Props {
   corridaId: string;
   onVolver: () => void;
   onIrAGobernanza: () => void;
+  onVerDetalleCasos: () => void;
 }
 
-export function Reporte({ casoId, corridaId, onVolver, onIrAGobernanza }: Props) {
+export function Reporte({ casoId, corridaId, onVolver, onIrAGobernanza, onVerDetalleCasos }: Props) {
   const [reporte, setReporte] = useState<ReporteEvaluacion | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -38,9 +39,14 @@ export function Reporte({ casoId, corridaId, onVolver, onIrAGobernanza }: Props)
 
   return (
     <div>
-      <button onClick={onVolver} className="text-sm text-tinta/50 hover:text-tinta print:hidden">
-        ← Volver a casos de uso
-      </button>
+      <div className="flex items-center justify-between print:hidden">
+        <button onClick={onVolver} className="text-sm text-tinta/50 hover:text-tinta">
+          ← Volver a casos de uso
+        </button>
+        <button onClick={onVerDetalleCasos} className="rounded-card bg-marca px-4 py-2 text-sm font-medium text-white hover:bg-marca/90">
+          Ver detalle de los casos y cada respuesta →
+        </button>
+      </div>
 
       {/* Encabezado solo para la versión impresa/PDF, ya que el header con navegación se oculta al imprimir. */}
       <div className="mb-6 hidden border-b border-linea pb-4 print:block">

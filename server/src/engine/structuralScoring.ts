@@ -5,6 +5,9 @@
  * barato y más confiable que un juez para este tipo de tarea.
  */
 
+/** Bajo este score, el veredicto binario es "fallo". Más estricto que el del juez: acá casi todo es igualdad exacta. */
+const UMBRAL_APROBACION = 0.75;
+
 function normalizarValor(v: unknown): string {
   return String(v ?? "")
     .toLowerCase()
@@ -30,30 +33,66 @@ export interface OpcionesScoringEstructural {
   camposAmbiguos?: string[];
 }
 
-export function scoreEstructural(respuestaModelo: unknown, opciones: OpcionesScoringEstructural): number {
-  const claves = Object.keys(opciones.camposEsperados);
-  if (claves.length === 0) return 0;
+export interface CampoComparado {
+  clave: string;
+  esperado: string;
+  obtenido: string | null;
+  esAmbiguo: boolean;
+  puntaje: number;
+}
 
-  if (typeof respuestaModelo !== "object" || respuestaModelo === null || Array.isArray(respuestaModelo)) {
-    return 0; // se esperaba un objeto estructurado y no llegó
+export interface DetalleScoringEstructural {
+  score: number;
+  campos: CampoComparado[];
+  veredicto: "paso" | "fallo";
+  razonamiento: string;
+}
+
+export function scoreEstructuralConDetalle(respuestaModelo: unknown, opciones: OpcionesScoringEstructural): DetalleScoringEstructural {
+  const claves = Object.keys(opciones.camposEsperados);
+  const ambiguos = new Set(opciones.camposAmbiguos ?? []);
+
+  if (claves.length === 0) {
+    return { score: 0, campos: [], veredicto: "fallo", razonamiento: "No hay campos esperados definidos para este caso." };
+  }
+
+  const esObjeto = typeof respuestaModelo === "object" && respuestaModelo !== null && !Array.isArray(respuestaModelo);
+  if (!esObjeto) {
+    return {
+      score: 0,
+      campos: claves.map((clave) => ({ clave, esperado: normalizarValor(opciones.camposEsperados[clave]), obtenido: null, esAmbiguo: ambiguos.has(clave), puntaje: 0 })),
+      veredicto: "fallo",
+      razonamiento: "Se esperaba un objeto estructurado y la respuesta del modelo no lo es (llegó texto libre o un tipo distinto).",
+    };
   }
 
   const respuesta = respuestaModelo as Record<string, unknown>;
-  const ambiguos = new Set(opciones.camposAmbiguos ?? []);
-
-  let puntos = 0;
-  for (const clave of claves) {
-    if (!(clave in respuesta)) continue; // campo faltante = 0 puntos para ese campo
-
+  const campos: CampoComparado[] = claves.map((clave) => {
+    const esAmbiguo = ambiguos.has(clave);
     const esperado = normalizarValor(opciones.camposEsperados[clave]);
-    const obtenido = normalizarValor(respuesta[clave]);
-
-    if (ambiguos.has(clave)) {
-      puntos += similitudTexto(esperado, obtenido);
-    } else {
-      puntos += esperado === obtenido ? 1 : 0;
+    if (!(clave in respuesta)) {
+      return { clave, esperado, obtenido: null, esAmbiguo, puntaje: 0 };
     }
-  }
+    const obtenido = normalizarValor(respuesta[clave]);
+    const puntaje = esAmbiguo ? Number(similitudTexto(esperado, obtenido).toFixed(3)) : esperado === obtenido ? 1 : 0;
+    return { clave, esperado, obtenido, esAmbiguo, puntaje };
+  });
 
-  return Number((puntos / claves.length).toFixed(3));
+  const score = Number((campos.reduce((acc, c) => acc + c.puntaje, 0) / claves.length).toFixed(3));
+  const veredicto: "paso" | "fallo" = score >= UMBRAL_APROBACION ? "paso" : "fallo";
+
+  const faltantes = campos.filter((c) => c.obtenido === null);
+  const incorrectos = campos.filter((c) => c.obtenido !== null && c.puntaje < 1);
+  const partes: string[] = [];
+  if (faltantes.length > 0) partes.push(`Faltaron los campos: ${faltantes.map((c) => c.clave).join(", ")}.`);
+  if (incorrectos.length > 0) {
+    partes.push(
+      incorrectos
+        .map((c) => (c.esAmbiguo ? `"${c.clave}" tiene ${Math.round(c.puntaje * 100)}% de similitud con lo esperado` : `"${c.clave}" no coincide (esperado "${c.esperado}", obtuvo "${c.obtenido}")`))
+        .join("; ") + "."
+    );
+  }
+  if (partes.length === 0) partes.push("Todos los campos coinciden con lo esperado.");
+
+  return { score, campos, veredicto, razonamiento: partes.join(" ") };
 }

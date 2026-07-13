@@ -15,6 +15,9 @@
  * juez LLM real de otra familia de modelos.
  */
 
+/** Bajo este promedio, el veredicto binario es "fallo". Ajustable — no hay una única cifra "correcta" para un juez heurístico. */
+const UMBRAL_APROBACION = 0.55;
+
 function normalizar(texto: string): string {
   return texto
     .toLowerCase()
@@ -35,6 +38,12 @@ function solapamiento(a: Set<string>, b: Set<string>): number {
   return interseccion / Math.min(a.size, b.size);
 }
 
+function banda(valor: number): "alto" | "medio" | "bajo" {
+  if (valor >= 0.7) return "alto";
+  if (valor >= 0.4) return "medio";
+  return "bajo";
+}
+
 export interface EntradaJuez {
   pregunta: string;
   contextoRecuperado: string[];
@@ -48,6 +57,51 @@ export interface VeredictoJuez {
   completitud: number;
   promedio: number;
   confianza: number;
+  /** "paso" | "fallo", derivado de promedio vs. UMBRAL_APROBACION. */
+  veredicto: "paso" | "fallo";
+  /** Por qué el juez llegó a este veredicto — compuesto a partir de los mismos números, no inventado aparte. */
+  razonamiento: string;
+}
+
+function explicar(groundedness: number, relevancia: number, completitud: number, confianza: number, sinContexto: boolean): string {
+  const partes: string[] = [];
+
+  if (sinContexto) {
+    partes.push("No llegó contextoRecuperado del sistema del cliente, así que groundedness no tiene contra qué medirse y queda en el piso.");
+  } else {
+    const bg = banda(groundedness);
+    partes.push(
+      bg === "alto"
+        ? `Groundedness alto (${Math.round(groundedness * 100)}%): la respuesta comparte gran parte de su vocabulario con el contexto recuperado.`
+        : bg === "medio"
+          ? `Groundedness medio (${Math.round(groundedness * 100)}%): la respuesta se apoya solo parcialmente en el contexto recuperado.`
+          : `Groundedness bajo (${Math.round(groundedness * 100)}%): la respuesta comparte poco vocabulario con el contexto recuperado — posible respuesta no anclada.`
+    );
+  }
+
+  const br = banda(relevancia);
+  partes.push(
+    br === "alto"
+      ? `Relevancia alta (${Math.round(relevancia * 100)}%): responde directamente lo preguntado.`
+      : br === "medio"
+        ? `Relevancia media (${Math.round(relevancia * 100)}%): toca el tema pero no calza del todo con la pregunta.`
+        : `Relevancia baja (${Math.round(relevancia * 100)}%): comparte poco vocabulario con la pregunta.`
+  );
+
+  const bc = banda(completitud);
+  partes.push(
+    bc === "alto"
+      ? `Completitud alta (${Math.round(completitud * 100)}%): cubre lo que indicaba la referencia provisional.`
+      : bc === "medio"
+        ? `Completitud media (${Math.round(completitud * 100)}%): cubre parte de lo esperado según la referencia (provisional, señal secundaria).`
+        : `Completitud baja (${Math.round(completitud * 100)}%): falta cobertura frente a la referencia provisional (señal secundaria, no concluyente por sí sola).`
+  );
+
+  if (confianza < 0.4) {
+    partes.push("El juez tiene baja confianza en este veredicto: los tres criterios discrepan bastante entre sí.");
+  }
+
+  return partes.join(" ");
 }
 
 export function juzgar(entrada: EntradaJuez): VeredictoJuez {
@@ -69,5 +123,8 @@ export function juzgar(entrada: EntradaJuez): VeredictoJuez {
   const confianzaCruda = 0.92 - variabilidad * 0.55 - (respuestaCorta ? 0.25 : 0);
   const confianza = Number(Math.max(0.12, Math.min(0.98, confianzaCruda)).toFixed(3));
 
-  return { groundedness, relevancia, completitud, promedio, confianza };
+  const veredicto: "paso" | "fallo" = promedio >= UMBRAL_APROBACION ? "paso" : "fallo";
+  const razonamiento = explicar(groundedness, relevancia, completitud, confianza, entrada.contextoRecuperado.length === 0);
+
+  return { groundedness, relevancia, completitud, promedio, confianza, veredicto, razonamiento };
 }

@@ -4,12 +4,16 @@ Plataforma self-service que evalúa qué modelo LLM conviene para cada caso de u
 
 Ver [DECISIONS.md](./DECISIONS.md) para el detalle de decisiones de arquitectura, y [server/src/engine](./server/src/engine) + [probe/src](./probe/src) para el corazón del sistema.
 
+**¿Vas a conectar un sistema real?** Empieza por [docs/CONECTAR-SISTEMA-REAL.md](./docs/CONECTAR-SISTEMA-REAL.md) (checklist corto) y [docs/COMO-FUNCIONA-LA-CONEXION.md](./docs/COMO-FUNCIONA-LA-CONEXION.md) (cómo funciona por dentro, con las limitaciones dichas sin adornos).
+
 ## Estructura del monorepo
 
 ```
-/probe    SDK @vectora/probe — el cliente lo instala para exponer su sistema a Vectora
-/server   Fastify + Prisma (SQLite) — motor de evaluación, catálogo de modelos, API
-/client   React + Vite + Tailwind — la UI de Vectora
+/probe               SDK @vectora/probe — el cliente lo instala para exponer su sistema a Vectora
+/server              Fastify + Prisma (SQLite) — motor de evaluación, catálogo de modelos, API
+/client              React + Vite + Tailwind — la UI de Vectora
+/examples/cliente-demo   Sistema cliente independiente y real (no un mock) — plantilla para conectar tu sistema
+/docs                Cómo funciona la conexión y checklist para conectar un sistema real
 ```
 
 ## Requisitos (macOS)
@@ -72,6 +76,17 @@ curl -X POST http://localhost:4501/probe/ejecutar \
 
 Cambia `"modelo"` por cualquier id del catálogo (`gpt-4o`, `claude-3-5-sonnet`, `gemini-1-5-flash`, `gpt-4o-mini`, `llama-3-1-70b`, ver `server/src/engine/modelCatalog.ts`) y compara: el `contextoRecuperado` es idéntico entre corridas — solo cambia el modelo y, con él, la respuesta y la latencia.
 
+## Conectar un sistema real hoy
+
+`examples/cliente-demo/` es un sistema cliente independiente y real (no un mock del motor): un bot RAG con 10 documentos markdown y `@vectora/probe` de verdad, pensado como plantilla.
+
+```bash
+npm run dev:cliente-demo                       # levanta en :4600, respuestas con un stub local
+OPENAI_API_KEY=sk-... npm run dev:cliente-demo # gpt-4o y gpt-4o-mini responden con OpenAI real
+```
+
+Ver [examples/cliente-demo/README.md](./examples/cliente-demo/README.md) para conectarlo a Vectora y qué archivo reemplazar para pasar a tu propio sistema.
+
 ## Probar el flujo completo (Módulos 1 y 2)
 
 Con `npm run dev` corriendo (server + client + fixtures demo):
@@ -79,8 +94,9 @@ Con `npm run dev` corriendo (server + client + fixtures demo):
 1. Abre [http://localhost:5173](http://localhost:5173) → "+ Nuevo caso de uso".
 2. Paso 1: completa nombre/descripción/tipo de tarea/dominio.
 3. Paso 2: conecta `http://localhost:4501` (bot de soporte demo) o `http://localhost:4502` (fraude demo) según el tipo elegido, usa "Usar KB de ejemplo" (o "Usar ejemplos de muestra" si es extracción/clasificación) para no tener que escribir insumos a mano, y elige al menos 2 modelos.
-4. Paso 3: confirma el costo estimado y corre — vas a ver progreso en vivo por modelo.
+4. Paso 3: confirma el costo estimado y corre — vas a ver progreso en vivo por modelo, y un link para ver el set de casos generado sin esperar a que termine.
 5. Reporte: veredicto, tabla comparativa, y la frontera de Pareto costo-vs-precisión.
+6. "Ver detalle de los casos y cada respuesta →": el set completo (pregunta, dificultad, de qué documento del KB salió) con acordeón por caso — al expandir, la respuesta de cada modelo lado a lado con el veredicto del juez (pasó/falló), sus scores y su razonamiento en texto. Filtros: algún modelo falló / baja confianza del juez / los modelos discrepan.
 
 ## Probar calibración y gobernanza (Módulos 3 y 4)
 
@@ -94,4 +110,4 @@ Ver [CONNECT-REAL-MODELS.md](./CONNECT-REAL-MODELS.md) — explica exactamente q
 
 ## Estado del proyecto
 
-**Las 4 fases completas**: monorepo, SDK `@vectora/probe` (register/wrap funcionales), motor Mock de modelos, Fastify + Prisma + SQLite, seed de "Fintech Andina". Motor de evaluación real (agente generador, scoring dual, orquestador con rate limiting, estimador de costo, reporte con veredicto + Pareto). Calibración del juez con cola de baja confianza y contador de acuerdo por dominio. Registro de gobernanza con ledger derivado, tarjetas resumen, y alertas por evento que re-ejecutan el sistema real del cliente. Export a PDF real vía impresión del navegador, estados vacíos/de error auditados en las 6 páginas, y onboarding recorrible desde una base de datos completamente vacía (sin depender del seed). Todo probado de punta a punta en navegador real (Chromium vía Playwright ad hoc), no solo con curl.
+**Las 4 fases del plan original completas**, más una fase de foco reducido en lo que valida la hipótesis de valor: monorepo, SDK `@vectora/probe` (register/wrap funcionales, con timeout), motor Mock de modelos, Fastify + Prisma + SQLite, seed de "Fintech Andina". Motor de evaluación real (agente generador con trazabilidad al KB, scoring dual, orquestador con rate limiting, estimador de costo, reporte con veredicto + Pareto). Calibración del juez, gobernanza con alertas por evento reales, export PDF, onboarding desde base vacía. Documentación honesta de cómo funciona la conexión y sus límites, un ejemplo de cliente independiente conectable con modelos reales hoy, y una vista de detalle caso por caso (trazabilidad, respuesta de cada modelo, veredicto y razonamiento del juez, filtros). Todo probado de punta a punta en navegador real (Chromium vía Playwright ad hoc), no solo con curl.

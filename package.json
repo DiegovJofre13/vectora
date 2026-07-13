@@ -6,7 +6,8 @@
   "workspaces": [
     "probe",
     "server",
-    "client"
+    "client",
+    "examples/cliente-demo"
   ],
   "scripts": {
     "build": "npm run build -w @vectora/probe && npm run build -w @vectora/server",
@@ -14,6 +15,7 @@
     "dev:client": "npm run dev -w @vectora/client",
     "dev:demo-bot": "npm run demo:bot -w @vectora/server",
     "dev:demo-fraude": "npm run demo:fraude -w @vectora/server",
+    "dev:cliente-demo": "npm run dev -w cliente-demo-fintech",
     "dev": "npm run build -w @vectora/probe && concurrently -n server,client,demo-bot,demo-fraude -c green,cyan,yellow,magenta \"npm:dev:server\" \"npm:dev:client\" \"npm:dev:demo-bot\" \"npm:dev:demo-fraude\"",
     "db:push": "npm run db:push -w @vectora/server",
     "db:seed": "npm run db:seed -w @vectora/server",

@@ -25,10 +25,17 @@ export interface DocumentoKbInput {
   contenido: string;
 }
 
+export interface DocumentoKbNormalizado {
+  id: string;
+  titulo: string;
+  contenido: string;
+}
+
 export interface PreguntaGenerada {
   pregunta: string;
   dificultad: "simple" | "multi_hop" | "razonamiento";
-  contextoFuenteIds: string[];
+  /** Los documentos reales de donde salió la pregunta (trazabilidad) — no solo sus ids. */
+  documentosFuente: DocumentoKbNormalizado[];
   respuestaEsperadaProvisional: string;
 }
 
@@ -60,12 +67,6 @@ function extraerFrase(contenido: string, nPalabras = 10): string {
   return frase.charAt(0).toLowerCase() + frase.slice(1);
 }
 
-interface DocumentoKbNormalizado {
-  id: string;
-  titulo: string;
-  contenido: string;
-}
-
 function normalizarDocs(docs: DocumentoKbInput[]): DocumentoKbNormalizado[] {
   return docs.map((d, i) => ({ id: d.id || `kb-input-${i + 1}`, titulo: d.titulo, contenido: d.contenido }));
 }
@@ -87,7 +88,7 @@ export function generarPreguntas(docsInput: DocumentoKbInput[], cantidadObjetivo
     preguntas.push({
       pregunta: plantilla(doc.titulo, extraerFrase(doc.contenido)),
       dificultad: "simple",
-      contextoFuenteIds: [doc.id],
+      documentosFuente: [doc],
       respuestaEsperadaProvisional: doc.contenido,
     });
   }
@@ -100,7 +101,7 @@ export function generarPreguntas(docsInput: DocumentoKbInput[], cantidadObjetivo
     preguntas.push({
       pregunta: plantilla(docA.titulo, extraerFrase(docA.contenido), docB.titulo, extraerFrase(docB.contenido)),
       dificultad: "multi_hop",
-      contextoFuenteIds: docA.id === docB.id ? [docA.id] : [docA.id, docB.id],
+      documentosFuente: docA.id === docB.id ? [docA] : [docA, docB],
       respuestaEsperadaProvisional: docA.id === docB.id ? docA.contenido : `${docA.contenido} Además: ${docB.contenido}`,
     });
   }
@@ -112,7 +113,7 @@ export function generarPreguntas(docsInput: DocumentoKbInput[], cantidadObjetivo
     preguntas.push({
       pregunta: plantilla(doc.titulo, extraerFrase(doc.contenido)),
       dificultad: "razonamiento",
-      contextoFuenteIds: [doc.id],
+      documentosFuente: [doc],
       respuestaEsperadaProvisional: doc.contenido,
     });
   }

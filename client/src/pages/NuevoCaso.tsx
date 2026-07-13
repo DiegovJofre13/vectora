@@ -7,11 +7,12 @@ import { crearCasoDeUso, crearOrganizacion, listarOrganizaciones, type CasoDeUso
 interface Props {
   onCancelar: () => void;
   onCompletado: (casoId: string, corridaId: string) => void;
+  onVerCasos: (casoId: string, corridaId: string) => void;
 }
 
 const PASOS = ["Caso de uso", "Conectar y elegir modelos", "Correr evaluación", "Reporte"];
 
-export function NuevoCaso({ onCancelar, onCompletado }: Props) {
+export function NuevoCaso({ onCancelar, onCompletado, onVerCasos }: Props) {
   const [paso, setPaso] = useState<1 | 2 | 3>(1);
   const [caso, setCaso] = useState<CasoDeUsoResumen | null>(null);
   const [datosConexion, setDatosConexion] = useState<DatosConexionModelos | null>(null);
@@ -84,6 +85,7 @@ export function NuevoCaso({ onCancelar, onCompletado }: Props) {
             datos={datosConexion}
             onVolver={() => setPaso(2)}
             onCompletado={(corridaId) => onCompletado(caso.id, corridaId)}
+            onVerCasos={(corridaId) => onVerCasos(caso.id, corridaId)}
           />
         )}
       </div>

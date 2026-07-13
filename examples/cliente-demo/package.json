@@ -1,0 +1,20 @@
+{
+  "name": "cliente-demo-fintech",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Ejemplo independiente de un sistema cliente conectado a Vectora vía @vectora/probe — plantilla para conectar un sistema real.",
+  "type": "module",
+  "scripts": {
+    "start": "tsx src/index.ts",
+    "dev": "VECTORA_PROBE_PORT=4600 tsx watch src/index.ts",
+    "build": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@vectora/probe": "*"
+  },
+  "devDependencies": {
+    "@types/node": "^22.9.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.6.3"
+  }
+}

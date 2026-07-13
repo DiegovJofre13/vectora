@@ -99,6 +99,32 @@ export function sintetizarConfianzaJuez(rng: () => number, forzarBaja: boolean):
   return Number((0.68 + rng() * 0.3).toFixed(3));
 }
 
+const UMBRAL_APROBACION_JUEZ = 0.55;
+
+/** Mismo umbral y misma forma de razonamiento que engine/judge.ts::juzgar(), para que los
+ * datos sembrados se vean como los que produce el motor en vivo, no como un caso aparte. */
+export function sintetizarVeredictoJuez(
+  scores: { groundedness: number; relevancia: number; completitud: number; promedio: number },
+  acierto: boolean
+): { veredicto: "paso" | "fallo"; razonamiento: string } {
+  const veredicto: "paso" | "fallo" = scores.promedio >= UMBRAL_APROBACION_JUEZ ? "paso" : "fallo";
+  const razonamiento = acierto
+    ? `Groundedness ${Math.round(scores.groundedness * 100)}%, relevancia ${Math.round(scores.relevancia * 100)}%, completitud ${Math.round(scores.completitud * 100)}%: la respuesta se apoya en el contexto recuperado y cubre lo esperado.`
+    : `Groundedness ${Math.round(scores.groundedness * 100)}%, relevancia ${Math.round(scores.relevancia * 100)}%, completitud ${Math.round(scores.completitud * 100)}%: la respuesta no logró anclarse bien al contexto ni cubrir la referencia esperada.`;
+  return { veredicto, razonamiento };
+}
+
+/** Sortea si cada uno de los 2 campos (no ambiguos) coincide exactamente, igual que haría
+ * el motor real (engine/structuralScoring.ts): para un campo no ambiguo el puntaje es binario
+ * (0 o 1), nunca un porcentaje — un porcentaje ahí implicaría similitud de texto, que solo
+ * aplica a campos declarados ambiguos. El score agregado es el promedio de ambos. */
+export function sintetizarCamposEstructural(rng: () => number, probCorrecto: number): { campo1: 0 | 1; campo2: 0 | 1; score: number } {
+  const campo1: 0 | 1 = rng() < probCorrecto ? 1 : 0;
+  const campo2: 0 | 1 = rng() < probCorrecto ? 1 : 0;
+  const score = Number(((campo1 + campo2) / 2).toFixed(3));
+  return { campo1, campo2, score };
+}
+
 export function latenciaConJitter(rng: () => number, base: number): number {
   const factor = 0.8 + rng() * 0.4;
   return Math.round(base * factor);

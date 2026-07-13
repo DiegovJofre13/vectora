@@ -106,7 +106,9 @@ model CasoPrueba {
   /// true = generado por el agente generador; false = documento real del cliente (extracción/clasificación).
   esSintetico Boolean @default(true)
 
-  /// Chunk del knowledge base que originó este caso, si el tipo de tarea lo generó.
+  /// json-encoded: [{ id, titulo, contenido }] — los documentos reales del knowledge base de
+  /// donde el agente generador derivó esta pregunta (trazabilidad). Null si no aplica
+  /// (extracción/clasificación, donde el documento ya es el `input`, no hay KB de por medio).
   contextoFuente String?
 
   resultados ResultadoModelo[]
@@ -143,6 +145,15 @@ model ResultadoModelo {
 
   /// Confianza del juez en su propio veredicto (0-1). < 0.65 entra a calibración (Módulo 3).
   confianzaJuez Float?
+
+  /// "paso" | "fallo" — veredicto binario del juez (RAG/conversacional), derivado de scorePromedio.
+  veredictoJuez String?
+  /// Por qué el juez llegó a ese veredicto, en texto — no solo el número. Ver engine/judge.ts::explicar().
+  razonamientoJuez String?
+
+  /// json-encoded: detalle campo por campo del scoring estructural (esperado/obtenido/coincide).
+  /// Ver engine/structuralScoring.ts. Null en casos RAG (no aplica).
+  detalleEstructural String?
 
   createdAt DateTime @default(now())
 

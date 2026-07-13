@@ -4,6 +4,7 @@ import { db } from "../lib/db.js";
 import { iniciarCorrida } from "../engine/orchestrator.js";
 import { obtenerProgreso } from "../engine/orchestrator.js";
 import { generarReporte } from "../engine/report.js";
+import { obtenerCasosConDetalle } from "../engine/caseDetail.js";
 
 const kbDocSchema = z.object({ id: z.string().optional(), titulo: z.string().min(1), contenido: z.string().min(1) });
 const documentoExistenteSchema = z.object({
@@ -59,6 +60,19 @@ export async function registrarRutasEvaluaciones(app: FastifyInstance): Promise<
     try {
       const reporte = await generarReporte(req.params.corridaId);
       return { reporte };
+    } catch {
+      reply.code(404);
+      return { ok: false, error: "Corrida no encontrada." };
+    }
+  });
+
+  // El set de pruebas + detalle por modelo. A propósito NO requiere que la corrida esté
+  // completa: los CasoPrueba ya existen desde que se creó la corrida (ver iniciarCorrida()),
+  // así que se puede ver el set generado y el detalle parcial mientras sigue corriendo.
+  app.get<{ Params: { id: string; corridaId: string } }>("/api/casos-de-uso/:id/evaluaciones/:corridaId/casos", async (req, reply) => {
+    try {
+      const detalle = await obtenerCasosConDetalle(req.params.corridaId);
+      return detalle;
     } catch {
       reply.code(404);
       return { ok: false, error: "Corrida no encontrada." };
