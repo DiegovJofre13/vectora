@@ -28,6 +28,8 @@ export interface ModeloCatalogo {
   openWeights: boolean;
   latenciaBaseMs: number;
   calidadBase: number;
+  /** Si el gateway de Vectora puede llamarlo de verdad hoy (solo OpenAI por ahora). */
+  gatewaySoportado: boolean;
 }
 
 export interface EstimacionCosto {

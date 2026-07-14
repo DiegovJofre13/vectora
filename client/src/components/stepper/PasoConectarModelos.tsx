@@ -29,6 +29,7 @@ const DOCS_EJEMPLO: DocExistenteForm[] = [
 
 export interface DatosConexionModelos {
   probeUrl: string;
+  nombreSistema?: string;
   modelos: string[];
   kbDocs?: KbDocInput[];
   documentosExistentes?: DocumentoExistenteInput[];
@@ -41,38 +42,71 @@ interface Props {
   nombre: string;
   descripcion: string;
   volumenMensual?: number;
+  /** Si el usuario ya había completado este paso y volvió atrás, rehidrata todo en vez de resetear. */
+  valorInicial?: DatosConexionModelos | null;
   onSiguiente: (datos: DatosConexionModelos) => void;
   onVolver: () => void;
 }
 
-export function PasoConectarModelos({ casoId, tipoTarea, requiereGenerador, nombre, descripcion, volumenMensual, onSiguiente, onVolver }: Props) {
-  const [probeUrl, setProbeUrl] = useState(requiereGenerador ? "http://localhost:4501" : "http://localhost:4502");
+function hidratarDocsExistentes(payload?: DocumentoExistenteInput[]): DocExistenteForm[] {
+  if (!payload) return [];
+  return payload.map((d) => ({
+    documentoTexto: typeof d.input === "object" && d.input && "documento" in d.input ? String((d.input as { documento: unknown }).documento) : "",
+    campos: Object.entries(d.esperado).map(([clave, valor]) => ({ clave, valor: String(valor) })),
+  }));
+}
+
+export function PasoConectarModelos({
+  casoId,
+  tipoTarea,
+  requiereGenerador,
+  nombre,
+  descripcion,
+  volumenMensual,
+  valorInicial,
+  onSiguiente,
+  onVolver,
+}: Props) {
+  const [probeUrl, setProbeUrl] = useState(valorInicial?.probeUrl ?? (requiereGenerador ? "http://localhost:4501" : "http://localhost:4502"));
   const [verificando, setVerificando] = useState(false);
-  const [verificado, setVerificado] = useState(false);
-  const [nombreSistema, setNombreSistema] = useState<string | null>(null);
+  const [verificado, setVerificado] = useState(Boolean(valorInicial));
+  const [nombreSistema, setNombreSistema] = useState<string | null>(valorInicial?.nombreSistema ?? null);
   const [errorConexion, setErrorConexion] = useState<string | null>(null);
 
   const [catalogo, setCatalogo] = useState<ModeloCatalogo[]>([]);
   const [sugeridos, setSugeridos] = useState<string[]>([]);
-  const [seleccionados, setSeleccionados] = useState<Set<string>>(new Set());
+  const [seleccionados, setSeleccionados] = useState<Set<string>>(new Set(valorInicial?.modelos ?? []));
   const [estimacion, setEstimacion] = useState<EstimacionCosto | null>(null);
   const [errorCatalogo, setErrorCatalogo] = useState<string | null>(null);
 
-  const [kbDocs, setKbDocs] = useState<KbDocInput[]>([]);
-  const [docsExistentes, setDocsExistentes] = useState<DocExistenteForm[]>([]);
+  const [kbDocs, setKbDocs] = useState<KbDocInput[]>(valorInicial?.kbDocs ?? []);
+  const [docsExistentes, setDocsExistentes] = useState<DocExistenteForm[]>(hidratarDocsExistentes(valorInicial?.documentosExistentes));
 
   useEffect(() => {
+    let cancelado = false;
     obtenerCatalogo()
-      .then(setCatalogo)
-      .catch((err) => setErrorCatalogo(err instanceof Error ? err.message : "No se pudo cargar el catálogo de modelos."));
-    sugerirModelosApi({ tipoTarea, nombre, descripcion, volumenMensual })
-      .then((s) => {
-        setSugeridos(s);
-        setSeleccionados(new Set(s));
+      .then((cat) => {
+        if (cancelado) return;
+        setCatalogo(cat);
+        const soportados = new Set(cat.filter((m) => m.gatewaySoportado).map((m) => m.id));
+        // Si venimos de un valorInicial, ya sabemos qué eligió el usuario — no pisarlo con sugerencias.
+        if (valorInicial) return;
+        sugerirModelosApi({ tipoTarea, nombre, descripcion, volumenMensual })
+          .then((s) => {
+            if (cancelado) return;
+            const filtrados = s.filter((id) => soportados.has(id));
+            setSugeridos(filtrados);
+            setSeleccionados(new Set(filtrados));
+          })
+          .catch(() => {
+            // La sugerencia es un extra de UX, no bloquea el flujo si falla: el usuario igual puede elegir modelos a mano.
+          });
       })
-      .catch(() => {
-        // La sugerencia es un extra de UX, no bloquea el flujo si falla: el usuario igual puede elegir modelos a mano.
-      });
+      .catch((err) => setErrorCatalogo(err instanceof Error ? err.message : "No se pudo cargar el catálogo de modelos."));
+    return () => {
+      cancelado = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tipoTarea, nombre, descripcion, volumenMensual]);
 
   const numCasos = requiereGenerador ? 30 : Math.max(docsExistentes.length, 1);
@@ -99,7 +133,8 @@ export function PasoConectarModelos({ casoId, tipoTarea, requiereGenerador, nomb
     }
   }
 
-  function toggleModelo(id: string) {
+  function toggleModelo(id: string, gatewaySoportado: boolean) {
+    if (!gatewaySoportado) return;
     setSeleccionados((prev) => {
       const next = new Set(prev);
       if (next.has(id)) next.delete(id);
@@ -274,7 +309,10 @@ export function PasoConectarModelos({ casoId, tipoTarea, requiereGenerador, nomb
 
       <section>
         <h2 className="font-display text-xl font-medium">4. Elige los modelos a comparar</h2>
-        <p className="mt-1 text-sm text-tinta/60">Mínimo 2. Los marcados con borde vienen sugeridos para este tipo de caso.</p>
+        <p className="mt-1 text-sm text-tinta/60">
+          Mínimo 2. Los marcados con borde vienen sugeridos para este tipo de caso. Solo se pueden elegir modelos que el gateway de Vectora ya
+          soporta (por ahora, solo OpenAI) — el resto queda listado para cuando se agreguen esas keys.
+        </p>
         {errorCatalogo && <div className="mt-3 rounded-card border border-coral/30 bg-coral/5 p-3 text-sm text-coral">{errorCatalogo}</div>}
         <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2">
           {catalogo.map((m) => {
@@ -283,16 +321,31 @@ export function PasoConectarModelos({ casoId, tipoTarea, requiereGenerador, nomb
             return (
               <label
                 key={m.id}
-                className={`flex cursor-pointer items-start gap-2 rounded-card border p-3 text-sm ${
-                  marcado ? "border-marca bg-marca-tinte" : esSugerido ? "border-marca/40" : "border-linea"
+                className={`flex items-start gap-2 rounded-card border p-3 text-sm ${
+                  !m.gatewaySoportado
+                    ? "cursor-not-allowed border-linea opacity-50"
+                    : marcado
+                      ? "cursor-pointer border-marca bg-marca-tinte"
+                      : esSugerido
+                        ? "cursor-pointer border-marca/40"
+                        : "cursor-pointer border-linea"
                 }`}
               >
-                <input type="checkbox" checked={marcado} onChange={() => toggleModelo(m.id)} className="mt-0.5" />
+                <input
+                  type="checkbox"
+                  checked={marcado}
+                  disabled={!m.gatewaySoportado}
+                  onChange={() => toggleModelo(m.id, m.gatewaySoportado)}
+                  className="mt-0.5"
+                />
                 <div className="flex-1">
                   <div className="flex items-center gap-2">
                     <span className="font-medium">{m.nombre}</span>
                     {esSugerido && <span className="rounded-full bg-marca px-1.5 py-0.5 text-[10px] font-medium text-white">sugerido</span>}
                     {m.openWeights && <span className="rounded-full bg-violeta/15 px-1.5 py-0.5 text-[10px] font-medium text-violeta">open</span>}
+                    {!m.gatewaySoportado && (
+                      <span className="rounded-full bg-tinta/10 px-1.5 py-0.5 text-[10px] font-medium text-tinta/50">próximamente</span>
+                    )}
                   </div>
                   <div className="font-mono text-xs text-tinta/50">
                     {m.proveedor} · ${m.precioPor1KUsd}/1K · {m.tier}
@@ -325,6 +378,7 @@ export function PasoConectarModelos({ casoId, tipoTarea, requiereGenerador, nomb
           onClick={() =>
             onSiguiente({
               probeUrl,
+              nombreSistema: nombreSistema ?? undefined,
               modelos: [...seleccionados],
               kbDocs: requiereGenerador ? kbDocs : undefined,
               documentosExistentes: requiereGenerador ? undefined : documentosExistentesPayload,

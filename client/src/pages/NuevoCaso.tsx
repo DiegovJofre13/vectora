@@ -70,6 +70,7 @@ export function NuevoCaso({ onCancelar, onCompletado, onVerCasos }: Props) {
             nombre={caso.nombre}
             descripcion={caso.descripcion}
             volumenMensual={caso.volumenMensual ?? undefined}
+            valorInicial={datosConexion}
             onVolver={() => setPaso(1)}
             onSiguiente={(datos) => {
               setDatosConexion(datos);
