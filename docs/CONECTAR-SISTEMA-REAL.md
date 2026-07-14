@@ -22,7 +22,9 @@ Tu función de entrada recibe `(input, ctx)` y debe devolver `{ respuesta, conte
 
 Los tres patrones completos, con código, están en el paso 2 del stepper de Vectora (snippets copiables) y en `client/src/components/stepper/SnippetProbe.tsx`.
 
-## 3. Declarar `wrap` en el punto exacto de la llamada al modelo
+## 3. Declarar `wrap` (tu key) o `completar` (el gateway de Vectora) en el punto exacto de la llamada al modelo
+
+**Con tu propia API key del proveedor:**
 
 ```typescript
 const respuesta = await probe.wrap(ctx, (modelo) =>
@@ -31,6 +33,14 @@ const respuesta = await probe.wrap(ctx, (modelo) =>
 ```
 
 Chequeo crítico: **tu `miClienteLLM.completar` tiene que usar de verdad el parámetro `modelo`** para decidir a qué proveedor/modelo llamar. Si lo ignora (modelo hardcodeado), Vectora no lo detecta solo — el síntoma es que el reporte final muestra a todos los modelos del panel con métricas casi idénticas. Ver `docs/COMO-FUNCIONA-LA-CONEXION.md` § 3.
+
+**Sin key propia, con el gateway de Vectora (Vectora llama al modelo y te cobra créditos):**
+
+```typescript
+const { texto } = await probe.completar(ctx, { prompt });
+```
+
+Requiere pasar tu `apiKey` de Vectora al crear el probe (`crearProbe({ apiKey })` o env var `VECTORA_API_KEY`) — la sacás de la pestaña Gobernanza → Créditos en la UI. Ver `docs/COMO-FUNCIONA-LA-CONEXION.md` § 5. Solo modelos de OpenAI por ahora.
 
 ## 4. Arrancar tu sistema
 
@@ -56,14 +66,16 @@ curl -X POST http://localhost:4600/probe/ejecutar \
 
 Si `registrado` da `false`, tu proceso arrancó pero nunca llamó `probe.register(fn)`. Si el `curl` a `/probe/ejecutar` da `{"ok":false,"error":...}`, el error viene de adentro de tu función registrada — el mensaje es literalmente lo que tiró tu excepción.
 
-## 6. API keys de modelos
+## 6. API keys
 
-Van en **tu** proceso (variables de entorno de tu sistema, ej. `OPENAI_API_KEY`), nunca en Vectora. El server de Vectora no pide ni almacena ninguna credencial de proveedor de modelos — solo conoce la URL de tu probe. Ver `examples/cliente-demo/src/llm.ts` para un ejemplo funcional con OpenAI real.
+**Si usás tu propia key de proveedor (Opción A del paso 3):** va en **tu** proceso (variables de entorno de tu sistema, ej. `OPENAI_API_KEY`), nunca en Vectora. Ver `examples/cliente-demo/src/llm.ts` para un ejemplo funcional con OpenAI real.
+
+**Si usás el gateway de Vectora (Opción B):** tu `apiKey` de Vectora (`vec_live_...`) también va en tu proceso, como env var `VECTORA_API_KEY` — identifica a tu organización para cobrarle créditos, no da acceso a nada de Vectora más allá de `POST /api/gateway/completar`. Cargá créditos primero (Gobernanza → Créditos → "Cargar créditos") o la corrida se bloquea por saldo insuficiente.
 
 ## 7. Recién ahí, correr una evaluación
 
-Paso 3 del stepper: confirmás el costo estimado y corrés. Cada caso × cada modelo del panel es un `POST /probe/ejecutar` real a tu sistema, con hasta 4 en simultáneo.
+Paso 3 del stepper: confirmás el costo estimado y corrés. Cada caso × cada modelo del panel es un `POST /probe/ejecutar` real a tu sistema, con hasta 4 en simultáneo. Si tu sistema usa el gateway de Vectora, además cada llamada al modelo te descuenta créditos en tiempo real — si el saldo llega a cero a mitad de la corrida, esos casos puntuales van a fallar (quedan marcados como error en el reporte, no frenan el resto).
 
 ## Antes de conectar algo que no corre en tu misma máquina
 
-No hay autenticación entre Vectora y el probe del cliente (ver `COMO-FUNCIONA-LA-CONEXION.md` § 5). Si tu sistema corre en otra máquina o en la nube, no expongas el puerto del probe directamente a internet — usá un túnel autenticado (ngrok, VPN, SSH tunnel) y apuntá "Conectar sistema" a esa URL en vez de a la IP/puerto directo.
+No hay autenticación entre Vectora y el probe del cliente (ver `COMO-FUNCIONA-LA-CONEXION.md` § 6). Si tu sistema corre en otra máquina o en la nube, no expongas el puerto del probe directamente a internet — usá un túnel autenticado (ngrok, VPN, SSH tunnel) y apuntá "Conectar sistema" a esa URL en vez de a la IP/puerto directo.

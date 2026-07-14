@@ -19,6 +19,16 @@ model Organizacion {
   nombre    String
   createdAt DateTime @default(now())
 
+  /// Saldo prepago en USD. Pago por uso: cada corrida que pasa por el gateway de modelos de
+  /// Vectora descuenta de acá (costo real del proveedor + margen). Sin procesar pagos reales:
+  /// se "carga" manualmente (ver engine/credits.ts).
+  saldoCreditosUsd Float @default(0)
+
+  /// Key secreta que el sistema del cliente usa para autenticarse contra el gateway de modelos
+  /// de Vectora (@vectora/probe -> POST /api/gateway/completar). Nullable: se genera perezosamente
+  /// (obtenerOCrearApiKeyGateway) para no romper organizaciones creadas antes de este campo.
+  apiKeyGateway String? @unique
+
   casosDeUso         CasoDeUso[]
   movimientosCredito MovimientoCreditos[]
 }
@@ -222,15 +232,27 @@ model EventoGobernanza {
 }
 
 /// Ledger de pago por uso. Unidad = una corrida (un caso de uso × un panel).
+/// Ledger de créditos: "carga" (top-up manual, sin pago real) o "consumo" (una corrida real
+/// contra el gateway de modelos). 1 crédito = 1 USD, a propósito, para no inventar una tasa de
+/// cambio credito<->dólar que no aporta nada en el MVP.
 model MovimientoCreditos {
   id                  String       @id @default(cuid())
   organizacionId      String
   organizacion        Organizacion @relation(fields: [organizacionId], references: [id])
   evaluacionCorridaId String?
 
-  creditosConsumidos Int
-  costoUsd           Float
-  descripcion        String
+  /// "carga" | "consumo"
+  tipo String
+
+  /// Monto en USD. Para "consumo" ya incluye margen (costoBaseUsd + margenUsd).
+  montoUsd Float
+
+  /// Solo "consumo": costo real reportado por el proveedor, antes de margen.
+  costoBaseUsd Float?
+  /// Solo "consumo": margen de Vectora sobre costoBaseUsd (ver engine/billing.ts).
+  margenUsd    Float?
+
+  descripcion String
 
   createdAt DateTime @default(now())
 

@@ -45,9 +45,9 @@ Este ejemplo tiene 3 archivos en `src/`. Un cliente real reemplaza cada uno con 
 
 | Archivo | Qué hace acá | Qué cambia un cliente real |
 |---|---|---|
-| `src/llm.ts` | Llama a OpenAI de verdad si hay `OPENAI_API_KEY`, si no, devuelve un stub local | Reemplazar por su propio cliente de modelos (su SDK de OpenAI/Bedrock/Anthropic con sus credenciales). Es el único archivo con lógica específica del proveedor. |
+| `src/llm.ts` | Llama a OpenAI de verdad si hay `OPENAI_API_KEY`, si no, devuelve un stub local | Solo aplica si usan su propia key (Opción B). Reemplazar por su propio cliente de modelos (su SDK de OpenAI/Bedrock/Anthropic con sus credenciales). Si usan el gateway de Vectora (Opción A), este archivo no hace falta. |
 | `src/retrieval.ts` | Lee `kb/*.md` del disco y busca por palabras clave | Reemplazar por su vector store o motor de búsqueda real. La firma que importa es `buscarEnKb(pregunta, k): DocumentoKb[]` — mientras devuelva algo con `titulo`/`contenido`, el resto no se entera del cambio. |
-| `src/index.ts` | Declara `probe.register` y llama `probe.wrap` alrededor de `completar()` | Casi no cambia. Si su tarea no es RAG (ej. extracción de un documento existente), cambia la forma del `input` y qué le pasa a `probe.wrap` — ver `docs/CONECTAR-SISTEMA-REAL.md` en la raíz del repo para los 3 patrones. |
+| `src/index.ts` | Declara `probe.register`, y usa `probe.completar()` (gateway) o `probe.wrap()` (key propia) según la env var que encuentre | Casi no cambia. Si su tarea no es RAG (ej. extracción de un documento existente), cambia la forma del `input` — ver `docs/CONECTAR-SISTEMA-REAL.md` en la raíz del repo para los 3 patrones. |
 
 En concreto, para pasar de este ejemplo a su sistema:
 
@@ -59,12 +59,24 @@ En concreto, para pasar de este ejemplo a su sistema:
 
 ## Usar modelos reales ahora mismo
 
-Sin ninguna otra configuración, corriendo con:
+Hay dos formas, elegí una (`src/index.ts` decide sola cuál según qué variable de entorno encuentre):
+
+### Opción A — Gateway de Vectora (Vectora paga y te cobra créditos)
+
+```bash
+VECTORA_API_KEY=vec_live_... npm run dev:cliente-demo
+```
+
+Con esto, cada llamada al modelo pasa por `probe.completar()` en vez de `probe.wrap()`: Vectora llama de verdad a OpenAI con su propia key, y te descuenta créditos (costo real + margen) de tu organización. Vos no necesitás ninguna API key de proveedor. Sacá tu `VECTORA_API_KEY` desde la pestaña "Gobernanza" de la UI de Vectora (sección Créditos).
+
+### Opción B — tu propia API key de OpenAI
 
 ```bash
 OPENAI_API_KEY=sk-... npm run dev:cliente-demo
 ```
 
-Los ids de catálogo `gpt-4o` y `gpt-4o-mini` van a llamar de verdad a la API de OpenAI (ver `src/llm.ts::completarConOpenAI`). Los otros 3 ids del catálogo (`claude-3-5-sonnet`, `gemini-1-5-flash`, `llama-3-1-70b`) van a seguir cayendo al stub local — agregar esos proveedores es agregar un `case` más en `src/llm.ts`, mismo patrón que el de OpenAI.
+Los ids de catálogo `gpt-4o` y `gpt-4o-mini` van a llamar de verdad a la API de OpenAI con tu key (ver `src/llm.ts::completarConOpenAI`), vía `probe.wrap`. Los otros 3 ids del catálogo (`claude-3-5-sonnet`, `gemini-1-5-flash`, `llama-3-1-70b`) van a seguir cayendo al stub local — agregar esos proveedores es agregar un `case` más en `src/llm.ts`, mismo patrón que el de OpenAI. **Tu API key vive solo acá, en tu máquina/proceso — nunca se la mandás a Vectora.**
 
-**La API key vive solo acá, en tu máquina/proceso — nunca se la mandás a Vectora.** Ver `docs/COMO-FUNCIONA-LA-CONEXION.md` § 5 para por qué eso es así por diseño.
+Si no configurás ninguna de las dos, todo cae al stub local (sin costo, sin llamadas reales) para que el ejemplo funcione igual sin configuración.
+
+Ver `docs/COMO-FUNCIONA-LA-CONEXION.md` § "Gateway de Vectora" para el detalle completo de las dos opciones.

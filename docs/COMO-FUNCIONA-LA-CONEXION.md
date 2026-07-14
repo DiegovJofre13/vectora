@@ -167,15 +167,46 @@ export type LlamadaModelo<T = unknown> = (modelo: string) => Promise<T>;
 - `wrap(ctx, llamadaModelo)` — obligatorio en el punto donde se llama al modelo. Retorna lo que sea que devuelva `llamadaModelo` (genérico `T`), sin tocarlo — el cliente decide la forma de `T`.
 - `contextoRecuperado` es **opcional**. Si no lo mandas (ej. un caso que no hace retrieval), el juez igual corre, pero `groundedness` se calcula contra un contexto vacío — en la práctica da groundedness ≈ 0 siempre, porque no hay nada contra qué comparar. Para tareas RAG de verdad, mandar `contextoRecuperado` no es opcional en la práctica, aunque el tipo lo permita.
 
-## 5. Autenticación y comunicación
+## 5. El gateway de Vectora: quién hace la llamada al modelo
 
-**No hay autenticación.** El servidor HTTP que levanta el SDK (`probe.ts::levantarServidor()`) no pide ningún API key, token, ni firma — es HTTP plano, cualquiera que pueda alcanzar ese puerto puede mandarle un `POST /probe/ejecutar` y hacer que ejecute la función registrada con el modelo que quiera. El protocolo es HTTP (no HTTPS) sobre `node:http` directo, sin TLS.
+Hasta acá, todo asume que el `llamadaModelo` que recibe `wrap` es del cliente — su propio `miClienteLLM`, con su propia API key. Esa sigue siendo una opción válida. Pero hay una segunda, agregada después: que **Vectora** haga la llamada real, absorba el costo, y se lo cobre al cliente vía créditos (pago por uso, con margen). Las dos conviven, elige el cliente cuál usar en cada sistema que conecta.
 
-Esto es aceptable para correr todo en `localhost` (que es el caso de uso actual: los fixtures demo y el ejemplo en `examples/cliente-demo/` corren en la misma máquina que el server de Vectora). **No es aceptable para exponer el probe de un cliente real a internet tal cual está.** Si necesitas conectar un sistema que corre en otra máquina/red esta semana, la recomendación es un túnel autenticado (ej. `ngrok` con verificación, un VPN, o un SSH tunnel) — no exponer el puerto del probe directamente. Esto es una limitación real, no una decisión de diseño: quedó así porque el MVP asume confianza total dentro de la misma red/máquina, y no se construyó ningún mecanismo de credenciales todavía.
+### Opción A — tu propia key (como antes)
 
-Vectora → cliente es siempre Vectora quien inicia la conexión (`fetch` desde `orchestrator.ts` y `casosDeUso.ts` hacia el `probeUrl` que el usuario ingresó). El cliente nunca llama a Vectora.
+```typescript
+const respuesta = await probe.wrap(ctx, (modelo) =>
+  miClienteLLM.completar({ modelo, prompt })   // tu key, tu proveedor, tu costo
+);
+```
 
-## 6. Manejo de errores
+### Opción B — el gateway de Vectora
+
+```typescript
+const { texto } = await probe.completar(ctx, { prompt });  // la key de Vectora, te cobra créditos
+```
+
+`probe.completar()` es un método nuevo del SDK (`probe/src/probe.ts`), complementario a `wrap` — no lo reemplaza. Requiere un `apiKey` de Vectora (`crearProbe({ apiKey })` o env var `VECTORA_API_KEY`), que identifica a la organización que paga. Por dentro:
+
+1. `probe.completar` hace `POST {gatewayUrl}/api/gateway/completar` con `Authorization: Bearer <apiKey>` y `{modelo, prompt}` (`gatewayUrl` default `http://localhost:4310`, o env var `VECTORA_GATEWAY_URL` — en un deploy real, la URL pública del server de Vectora).
+2. El server (`routes/gateway.ts`) busca la organización dueña de ese `apiKey`, chequea que tenga saldo positivo, y si alcanza, llama de verdad a OpenAI (`engine/providerGateway.ts::completarConGateway` — **solo modelos de OpenAI por ahora**, confirmado con el negocio; otros proveedores quedan para cuando haya keys).
+3. El costo se calcula con los tokens reales que devuelve OpenAI (`usage.prompt_tokens`/`usage.completion_tokens`), no con una heurística — acá se cobra plata de verdad. Se le aplica un margen del 30% (`engine/billing.ts::MARGEN_GATEWAY`) y el total se descuenta del saldo de la organización (`engine/credits.ts::registrarConsumo`), quedando en el ledger (`MovimientoCreditos`, tipo `"consumo"`).
+4. Si el saldo no alcanza, el gateway responde `402` con un error claro, y `probe.completar` lo propaga como excepción — la función registrada del cliente falla igual que si el proveedor real hubiera dado un error.
+
+Además de `iniciarCorrida()` (Vectora corre casos contra el probe del cliente) hay un segundo gate, **antes** de eso: al confirmar "correr" en el stepper, Vectora estima el costo de la corrida completa (la misma heurística de `costEstimator.ts` que ya mostraba el costo estimado) + margen, y si el saldo de la organización no alcanza para esa estimación, bloquea la corrida entera antes de gastar nada (`orchestrator.ts::iniciarCorrida`, y lo mismo en `governance.ts::simularEventoNuevoModelo` para las alertas por evento). Es un gate grueso (estimación, no el costo exacto) — el gate fino y exacto es el del punto 4, que solo cobra por lo que de verdad pasa por el gateway.
+
+**Importante:** Vectora no tiene forma de saber, al recibir un `POST /probe/ejecutar` del cliente, si la función registrada usó `wrap` (su key) o `completar` (el gateway) — eso lo decide el código del cliente, adentro de su propio proceso. El pre-check de saldo en `iniciarCorrida()` bloquea la corrida completa igual, asumiendo que se va a usar el gateway; si el cliente en realidad usa su propia key para todo, ese pre-check es más conservador de lo necesario (no se cobra nada, pero tampoco corre si el saldo está en cero). Ver Limitaciones conocidas.
+
+## 6. Autenticación y comunicación
+
+Hay dos direcciones distintas, con seguridad distinta:
+
+**Vectora → cliente (siempre así, sin cambios):** el server de Vectora es quien inicia la conexión (`fetch` desde `orchestrator.ts` y `casosDeUso.ts` hacia el `probeUrl` que el usuario ingresó) hacia el servidor HTTP que levanta el SDK del cliente (`probe.ts::levantarServidor()`). **Este servidor no pide ningún API key, token, ni firma** — es HTTP plano, cualquiera que pueda alcanzar ese puerto puede mandarle un `POST /probe/ejecutar` y hacer que ejecute la función registrada con el modelo que quiera. El protocolo es HTTP (no HTTPS) sobre `node:http` directo, sin TLS.
+
+Esto es aceptable para correr todo en `localhost` (fixtures demo, `examples/cliente-demo/`). **No es aceptable para exponer el probe de un cliente real a internet tal cual está.** Si necesitas conectar un sistema en otra máquina/red, la recomendación es un túnel autenticado (`ngrok` con verificación, VPN, SSH tunnel) — no exponer el puerto directamente. Sigue siendo una limitación real, no resuelta por el punto siguiente.
+
+**Cliente → Vectora (nuevo, solo para el gateway):** `POST /api/gateway/completar` sí está autenticado — con el `apiKey` de la organización (`Authorization: Bearer vec_live_...`), generado por Vectora y mostrado en la UI (Gobernanza → Créditos). Esto es una autenticación real (identifica y cobra a una organización), pero acotada solo a este endpoint — no protege el resto de la API de Vectora (`/api/casos-de-uso`, etc.), que sigue sin autenticación (limitación conocida, sin cambios).
+
+## 7. Manejo de errores
 
 Hay dos niveles distintos, y se comportan distinto:
 
@@ -189,15 +220,18 @@ Hay dos niveles distintos, y se comportan distinto:
 - Si algo dentro del loop de ejecución tira una excepción que *no* está contemplada (ej. un bug interno, no un error del cliente), el `Promise.all` de `ejecutarCorridaParaGobernanza` rechaza, y el `.catch()` en `iniciarCorrida()` marca la `EvaluacionCorrida` entera como `estado: "error"`. Los `ResultadoModelo` que ya se habían guardado antes de la falla quedan en la base (no se pierden), pero la corrida no sigue y el reporte no se puede generar hasta volver a correrla.
 - Si el server de Vectora se reinicia a mitad de una corrida "corriendo", esa corrida queda huérfana: nadie va a seguir llamando al probe del cliente, pero tampoco se marca como error — simplemente el progreso deja de avanzar para siempre. Es una limitación conocida (ver abajo), no un caso manejado.
 
-## 7. Limitaciones conocidas
+## 8. Limitaciones conocidas
 
 En orden de qué tan probable es que te muerda esta semana:
 
 1. **No hay forma de detectar si el cliente ignora el parámetro `modelo`.** Ver sección 3. Si el reporte muestra a todos los modelos con métricas casi idénticas, sospecha de esto primero.
-2. **Sin autenticación ni HTTPS.** Solo apto para correr en `localhost` o detrás de un túnel de confianza. Ver sección 5.
-3. **Sin reconexión si el server de Vectora se reinicia a mitad de una corrida.** La corrida queda huérfana en estado "corriendo" para siempre; hay que volver a lanzarla.
-4. **Sin reintentos automáticos** ante timeout o error puntual — un fallo transitorio de red se cuenta como fallo definitivo de ese caso×modelo.
-5. **Verificar-conexión prueba con un solo modelo fijo (`gpt-4o-mini`) y un `input` string fijo.** No prueba los modelos que realmente vas a evaluar, y puede dar falso negativo en tareas de extracción/clasificación (ver sección 3).
-6. **`ProbeResultado` no se valida contra el contrato en tiempo de ejecución.** Si `fn` devuelve algo con forma distinta a `{ respuesta, contextoRecuperado? }`, no hay error inmediato — el dato raro se propaga hasta el juez/scoring y ahí puede dar resultados sin sentido en vez de un error claro.
-7. **Concurrencia fija en 4** (`CONCURRENCIA_MAXIMA` en `orchestrator.ts`), no configurable por caso de uso ni por API. Si el sistema del cliente no aguanta 4 requests simultáneas, hoy no hay forma de bajarla sin editar código.
-8. **El juez y el agente generador siguen siendo heurísticas, no modelos reales** (ver `DECISIONS.md` y `CONNECT-REAL-MODELS.md`) — esto no es una limitación de la *conexión* en sí, pero afecta qué tan confiable es el reporte que sale de una corrida contra un sistema real.
+2. **Sin autenticación ni HTTPS entre Vectora y el probe del cliente** (dirección Vectora→cliente). Solo apto para correr en `localhost` o detrás de un túnel de confianza. Ver sección 6. El gateway (dirección cliente→Vectora) sí está autenticado.
+3. **El gateway solo soporta modelos de OpenAI.** `claude-3-5-sonnet`, `gemini-1-5-flash`, `llama-3-1-70b` no tienen key configurada — `probe.completar()` con esos ids tira un error claro (`modeloSoportadoPorGateway` en `providerGateway.ts`), no cae a un mock silencioso.
+4. **El pre-check de saldo en `iniciarCorrida()` es una estimación, no el costo exacto**, y bloquea la corrida completa asumiendo que se va a usar el gateway — aunque el cliente termine usando su propia key (en cuyo caso no se le cobra nada, pero el pre-check igual pudo haber bloqueado si el saldo estaba en cero). Ver sección 5.
+5. **Sin reconexión si el server de Vectora se reinicia a mitad de una corrida.** La corrida queda huérfana en estado "corriendo" para siempre; hay que volver a lanzarla.
+6. **Sin reintentos automáticos** ante timeout o error puntual — un fallo transitorio de red se cuenta como fallo definitivo de ese caso×modelo. Esto aplica también al gateway: si OpenAI falla una vez, no se reintenta, y no se cobra (el error se propaga antes de registrar el consumo).
+7. **Verificar-conexión prueba con un solo modelo fijo (`gpt-4o-mini`) y un `input` string fijo.** No prueba los modelos que realmente vas a evaluar, y puede dar falso negativo en tareas de extracción/clasificación (ver sección 3). Tampoco prueba el gateway — no cobra créditos ni valida que el `apiKey` esté bien configurado en el cliente.
+8. **`ProbeResultado` no se valida contra el contrato en tiempo de ejecución.** Si `fn` devuelve algo con forma distinta a `{ respuesta, contextoRecuperado? }`, no hay error inmediato — el dato raro se propaga hasta el juez/scoring y ahí puede dar resultados sin sentido en vez de un error claro.
+9. **Concurrencia fija en 4** (`CONCURRENCIA_MAXIMA` en `orchestrator.ts`), no configurable por caso de uso ni por API. Si el sistema del cliente no aguanta 4 requests simultáneas, hoy no hay forma de bajarla sin editar código.
+10. **El juez y el agente generador siguen siendo heurísticas, no modelos reales** (ver `DECISIONS.md` y `CONNECT-REAL-MODELS.md`) — esto no es una limitación de la *conexión* en sí, pero afecta qué tan confiable es el reporte que sale de una corrida contra un sistema real.
+11. **Los precios de OpenAI en `providerGateway.ts` están hardcodeados** (`PRECIOS_OPENAI`) y hay que actualizarlos a mano si OpenAI cambia su tabla de precios — no hay integración con ninguna API de pricing.

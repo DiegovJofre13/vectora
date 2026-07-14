@@ -35,7 +35,7 @@ export async function registrarRutasEvaluaciones(app: FastifyInstance): Promise<
 
     try {
       const { corridaId } = await iniciarCorrida(
-        { id: caso.id, tipoTarea: caso.tipoTarea, probeUrl: caso.probeUrl },
+        { id: caso.id, organizacionId: caso.organizacionId, tipoTarea: caso.tipoTarea, probeUrl: caso.probeUrl },
         parsed.data.modelos,
         { kbDocs: parsed.data.kbDocs, documentosExistentes: parsed.data.documentosExistentes }
       );

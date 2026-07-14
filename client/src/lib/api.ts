@@ -343,3 +343,34 @@ export interface CasosConDetalleRespuesta {
 export async function obtenerCasosDetalle(casoId: string, corridaId: string): Promise<CasosConDetalleRespuesta> {
   return req(`/api/casos-de-uso/${casoId}/evaluaciones/${corridaId}/casos`);
 }
+
+// --- Créditos: gateway de modelos (pago por uso, con margen) ---
+
+export interface MovimientoCreditos {
+  id: string;
+  tipo: "carga" | "consumo";
+  montoUsd: number;
+  costoBaseUsd: number | null;
+  margenUsd: number | null;
+  descripcion: string;
+  createdAt: string;
+}
+
+export interface ResumenCreditos {
+  saldoUsd: number;
+  apiKeyGateway: string;
+  movimientos: MovimientoCreditos[];
+}
+
+export async function obtenerResumenCreditos(organizacionId: string): Promise<ResumenCreditos> {
+  const data = await req<{ resumen: ResumenCreditos }>(`/api/organizaciones/${organizacionId}/creditos`);
+  return data.resumen;
+}
+
+export async function cargarCreditos(organizacionId: string, montoUsd: number): Promise<ResumenCreditos> {
+  const data = await req<{ resumen: ResumenCreditos }>(`/api/organizaciones/${organizacionId}/creditos/cargar`, {
+    method: "POST",
+    body: JSON.stringify({ montoUsd }),
+  });
+  return data.resumen;
+}

@@ -10,6 +10,8 @@ export type {
   EjecutarResponseOk,
   EjecutarResponseError,
   SaludResponse,
+  CompletarParams,
+  CompletarResultado,
 } from "./types.js";
 
 import { crearProbe } from "./probe.js";

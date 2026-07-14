@@ -44,6 +44,25 @@ export interface ProbeOptions {
   nombreSistema?: string;
   /** Si es false, no levanta servidor HTTP automáticamente al registrar (útil para tests in-process). Default true. */
   autoServe?: boolean;
+  /**
+   * API key de Vectora para usar `probe.completar()` (el gateway de modelos de Vectora, que
+   * llama al proveedor real y cobra créditos). Opcional: sin esto, `completar()` no está
+   * disponible y el cliente sigue llamando a los modelos con su propia key vía `wrap`.
+   * También se puede pasar por la variable de entorno VECTORA_API_KEY.
+   */
+  apiKey?: string;
+  /** URL del server de Vectora para el gateway. Default: http://localhost:4310, o env VECTORA_GATEWAY_URL. */
+  gatewayUrl?: string;
+}
+
+/** Parámetros para `probe.completar()` — el gateway de modelos de Vectora. */
+export interface CompletarParams {
+  prompt: string;
+}
+
+/** Resultado de `probe.completar()`. */
+export interface CompletarResultado {
+  texto: string;
 }
 
 /** Payload que Vectora envía al invocar una corrida sobre el sistema del cliente. */

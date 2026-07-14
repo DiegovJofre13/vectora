@@ -87,6 +87,17 @@ OPENAI_API_KEY=sk-... npm run dev:cliente-demo # gpt-4o y gpt-4o-mini responden 
 
 Ver [examples/cliente-demo/README.md](./examples/cliente-demo/README.md) para conectarlo a Vectora y qué archivo reemplazar para pasar a tu propio sistema.
 
+## Gateway de modelos: que Vectora pague y cobre créditos (en vez de la key del cliente)
+
+Además de que el cliente use su propia API key (arriba), el SDK soporta que **Vectora** haga la llamada real y le cobre créditos al cliente (costo real + 30% de margen) — pago por uso de verdad, no un contador simbólico. Solo OpenAI por ahora.
+
+1. Configura `OPENAI_API_KEY` en `server/.env` (la key de Vectora, nunca la del cliente).
+2. En la UI, pestaña "Gobernanza" → sección "Créditos": ahí está el saldo de la organización, su `apiKeyGateway` (`vec_live_...`), y un botón para cargar créditos (simulado, sin pago real).
+3. El sistema del cliente usa `probe.completar(ctx, { prompt })` en vez de `probe.wrap`, con `VECTORA_API_KEY` configurada (ver `examples/cliente-demo/` Opción A en su README).
+4. Sin saldo, las corridas se bloquean antes de gastar nada — tanto al confirmar "correr" en el stepper como en el endpoint del gateway mismo.
+
+Detalle completo (incluida la única limitación real: sin autenticación en la dirección Vectora→cliente, sí en cliente→gateway) en `docs/COMO-FUNCIONA-LA-CONEXION.md` § 5.
+
 ## Probar el flujo completo (Módulos 1 y 2)
 
 Con `npm run dev` corriendo (server + client + fixtures demo):
@@ -110,4 +121,4 @@ Ver [CONNECT-REAL-MODELS.md](./CONNECT-REAL-MODELS.md) — explica exactamente q
 
 ## Estado del proyecto
 
-**Las 4 fases del plan original completas**, más una fase de foco reducido en lo que valida la hipótesis de valor: monorepo, SDK `@vectora/probe` (register/wrap funcionales, con timeout), motor Mock de modelos, Fastify + Prisma + SQLite, seed de "Fintech Andina". Motor de evaluación real (agente generador con trazabilidad al KB, scoring dual, orquestador con rate limiting, estimador de costo, reporte con veredicto + Pareto). Calibración del juez, gobernanza con alertas por evento reales, export PDF, onboarding desde base vacía. Documentación honesta de cómo funciona la conexión y sus límites, un ejemplo de cliente independiente conectable con modelos reales hoy, y una vista de detalle caso por caso (trazabilidad, respuesta de cada modelo, veredicto y razonamiento del juez, filtros). Todo probado de punta a punta en navegador real (Chromium vía Playwright ad hoc), no solo con curl.
+**Las 4 fases del plan original completas**, más conexión real verificada de punta a punta y un gateway de modelos con dinero real: monorepo, SDK `@vectora/probe` (register/wrap/completar, con timeout), motor Mock de modelos, Fastify + Prisma + SQLite, seed de "Fintech Andina". Motor de evaluación real (agente generador con trazabilidad al KB, scoring dual, orquestador con rate limiting, estimador de costo, reporte con veredicto + Pareto). Calibración del juez, gobernanza con alertas por evento reales, export PDF, onboarding desde base vacía. Documentación honesta de cómo funciona la conexión y sus límites, un ejemplo de cliente independiente conectable con modelos reales hoy (con o sin el gateway de Vectora), una vista de detalle caso por caso (trazabilidad, respuesta de cada modelo, veredicto y razonamiento del juez, filtros), y un gateway de modelos real (OpenAI) con créditos, margen, y bloqueo por saldo insuficiente. Todo probado de punta a punta en navegador real (Chromium vía Playwright ad hoc) y con llamadas reales a OpenAI (costo real gastado: fracciones de centavo), no solo con curl ni con mocks.

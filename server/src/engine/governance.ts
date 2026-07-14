@@ -2,6 +2,10 @@ import { db } from "../lib/db.js";
 import { generarReporte } from "./report.js";
 import { buscarModelo, CATALOGO_MODELOS } from "./modelCatalog.js";
 import { ejecutarCorridaParaGobernanza } from "./orchestrator.js";
+import { estimarCostoCorrida } from "./costEstimator.js";
+import { aplicarMargen } from "./billing.js";
+import { verificarSaldoSuficiente } from "./credits.js";
+import { estrategiaScoringParaTipo, type TipoTarea } from "./taskTypes.js";
 
 /** Pasados este umbral de días sin una evaluación completada, el caso se marca "evaluación vieja". */
 const UMBRAL_DIAS_EVALUACION_VIEJA = 60;
@@ -134,6 +138,18 @@ export async function simularEventoNuevoModelo(casoDeUsoId: string): Promise<{ e
   const panelAnterior = JSON.parse(ultimaCorrida.modelosEvaluados) as string[];
   const modeloNuevo = CATALOGO_MODELOS.find((m) => !panelAnterior.includes(m.id));
   if (!modeloNuevo) return { error: "Ya evaluaste el panel completo del catálogo en este caso; no hay ningún modelo nuevo que simular." };
+
+  const nuevoPanelEstimado = [...panelAnterior, modeloNuevo.id];
+  const estimacion = estimarCostoCorrida({
+    modelos: nuevoPanelEstimado,
+    numCasos: ultimaCorrida.numCasos,
+    tipoEstimacion: estrategiaScoringParaTipo(caso.tipoTarea as TipoTarea) === "juez" ? "rag" : "estructural",
+  });
+  const { totalUsd: costoConMargen } = aplicarMargen(estimacion.costoTotalUsd);
+  const saldoAlcanza = await verificarSaldoSuficiente(caso.organizacionId, costoConMargen);
+  if (!saldoAlcanza) {
+    return { error: `Créditos insuficientes: re-correr costaría aprox. US$${costoConMargen.toFixed(2)} (con margen incluido). Carga créditos antes de simular el evento.` };
+  }
 
   const reporteAntes = await generarReporte(ultimaCorrida.id);
   const recomendadoAntes = reporteAntes.veredicto?.modeloRecomendado ?? null;

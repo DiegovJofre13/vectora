@@ -11,6 +11,8 @@
 import { PrismaClient } from "@prisma/client";
 import { CATALOGO_MODELOS, type ModeloCatalogo } from "../src/engine/modelCatalog.js";
 import { requiereGeneradorParaTipo, type TipoTarea } from "../src/engine/taskTypes.js";
+import { generarApiKeyGateway } from "../src/lib/apiKeys.js";
+import { aplicarMargen } from "../src/engine/billing.js";
 import {
   PREGUNTAS_BOT_SOPORTE,
   crearRng,
@@ -242,7 +244,9 @@ async function sembrarCorreccionesJuicio(casoDeUsoId: string, dominio: string, c
 async function main() {
   await limpiarFintechAndina();
 
-  const org = await db.organizacion.create({ data: { nombre: "Fintech Andina" } });
+  const org = await db.organizacion.create({
+    data: { nombre: "Fintech Andina", apiKeyGateway: generarApiKeyGateway(), saldoCreditosUsd: 0 },
+  });
 
   const modeloFrontera = CATALOGO_MODELOS.find((m) => m.tier === "frontera")!;
   const modelosIntermedios = CATALOGO_MODELOS.filter((m) => m.tier === "intermedio");
@@ -393,20 +397,41 @@ async function main() {
   });
   await sembrarEvaluacionEstructural({ casoDeUsoId: resumenLegal.id, numCasos: 5, modelos: panelCompleto, completadaHaceDias: 130, dominioLabel: "legal" });
 
-  // --- Ledger de créditos: una fila por corrida sembrada ---
-  const corridas = await db.evaluacionCorrida.findMany({ where: { casoDeUso: { organizacionId: org.id } } });
+  // --- Ledger de créditos: carga inicial + un consumo (con margen) por corrida sembrada ---
+  const CARGA_INICIAL_USD = 50;
+  await db.movimientoCreditos.create({
+    data: {
+      organizacionId: org.id,
+      tipo: "carga",
+      montoUsd: CARGA_INICIAL_USD,
+      descripcion: `Carga inicial de US$${CARGA_INICIAL_USD.toFixed(2)} (sin pago real)`,
+      createdAt: diasAtras(200),
+    },
+  });
+
+  const corridas = await db.evaluacionCorrida.findMany({
+    where: { casoDeUso: { organizacionId: org.id } },
+    orderBy: { completedAt: "asc" },
+  });
+  let saldoAcumulado = CARGA_INICIAL_USD;
   for (const corrida of corridas) {
+    const costoBaseUsd = corrida.costoRealUsd ?? 0;
+    const { margenUsd, totalUsd } = aplicarMargen(costoBaseUsd);
+    saldoAcumulado -= totalUsd;
     await db.movimientoCreditos.create({
       data: {
         organizacionId: org.id,
         evaluacionCorridaId: corrida.id,
-        creditosConsumidos: 1,
-        costoUsd: corrida.costoRealUsd ?? 0,
+        tipo: "consumo",
+        montoUsd: totalUsd,
+        costoBaseUsd,
+        margenUsd,
         descripcion: `Corrida de evaluación (${corrida.numCasos} casos × ${(JSON.parse(corrida.modelosEvaluados) as string[]).length} modelos)`,
         createdAt: corrida.completedAt ?? corrida.createdAt,
       },
     });
   }
+  await db.organizacion.update({ where: { id: org.id }, data: { saldoCreditosUsd: Number(saldoAcumulado.toFixed(6)) } });
 
   // eslint-disable-next-line no-console
   console.log(`Seed completo: organización "${org.nombre}" con ${5} casos de uso.`);

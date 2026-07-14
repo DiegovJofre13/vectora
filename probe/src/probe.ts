@@ -1,6 +1,8 @@
 import { createServer, type Server } from "node:http";
 import { PROBE_VERSION } from "./version.js";
 import type {
+  CompletarParams,
+  CompletarResultado,
   EjecutarRequest,
   EjecutarResponse,
   FuncionRegistrada,
@@ -11,6 +13,7 @@ import type {
 } from "./types.js";
 
 const PUERTO_DEFAULT = 4500;
+const GATEWAY_URL_DEFAULT = "http://localhost:4310";
 
 /**
  * VectoraProbe es el objeto central del SDK. Un cliente lo instancia una vez
@@ -26,11 +29,15 @@ export class VectoraProbe {
   private readonly puerto: number;
   private readonly nombreSistema: string | undefined;
   private readonly autoServe: boolean;
+  private readonly apiKey: string | undefined;
+  private readonly gatewayUrl: string;
 
   constructor(opciones: ProbeOptions = {}) {
     this.puerto = opciones.puerto ?? Number(process.env["VECTORA_PROBE_PORT"] ?? PUERTO_DEFAULT);
     this.nombreSistema = opciones.nombreSistema;
     this.autoServe = opciones.autoServe ?? true;
+    this.apiKey = opciones.apiKey ?? process.env["VECTORA_API_KEY"];
+    this.gatewayUrl = opciones.gatewayUrl ?? process.env["VECTORA_GATEWAY_URL"] ?? GATEWAY_URL_DEFAULT;
   }
 
   /**
@@ -61,6 +68,38 @@ export class VectoraProbe {
   /** Para el patrón C (sistema detrás de una API HTTP propia): qué modelo toca en esta corrida. */
   modeloActual(ctx: VectoraCtx): string {
     return ctx.modelo;
+  }
+
+  /**
+   * Alternativa a `wrap` + tu propio cliente de modelos: le pide a Vectora que
+   * haga la llamada real al modelo por vos (con el `apiKey` de tu organización)
+   * y te devuelve el texto. Vectora paga al proveedor y te descuenta créditos
+   * (costo real + margen) — no necesitás tu propia API key del proveedor.
+   * Requiere haber pasado `apiKey` (o la env var VECTORA_API_KEY) al crear el
+   * probe. Mide latencia igual que `wrap`, así que no hace falta envolver esto
+   * con `wrap` también.
+   */
+  async completar(ctx: VectoraCtx, params: CompletarParams): Promise<CompletarResultado> {
+    if (!this.apiKey) {
+      throw new Error(
+        "probe.completar() requiere un apiKey de Vectora (pásalo en crearProbe({ apiKey }) o en la env var VECTORA_API_KEY). " +
+          "Si preferís usar tu propia API key de modelo, usá probe.wrap() en vez de completar()."
+      );
+    }
+
+    const inicio = Date.now();
+    const res = await fetch(`${this.gatewayUrl.replace(/\/$/, "")}/api/gateway/completar`, {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: `Bearer ${this.apiKey}` },
+      body: JSON.stringify({ modelo: ctx.modelo, prompt: params.prompt, casoUsoId: ctx.casoUsoId, casoPruebaId: ctx.casoPruebaId }),
+    });
+    const data = (await res.json()) as { ok: boolean; error?: string; texto?: string };
+    ctx._metrica = { latenciaMs: Date.now() - inicio, modelo: ctx.modelo };
+
+    if (!data.ok) {
+      throw new Error(`Gateway de Vectora: ${data.error ?? `respondió ${res.status}`}`);
+    }
+    return { texto: data.texto ?? "" };
   }
 
   /**

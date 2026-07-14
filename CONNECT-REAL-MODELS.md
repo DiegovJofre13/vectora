@@ -2,9 +2,13 @@
 
 Esta guía explica exactamente qué tocar para pasar del motor Mock a modelos reales (Bedrock, OpenAI, Anthropic, Google, etc.), sin rediseñar nada de Vectora. Léela junto con `DECISIONS.md`, que explica *por qué* cada pieza está mockeada como está.
 
-## Primero, lo más importante: en el caso real (un cliente conectando su sistema), no hay nada que cambiar en Vectora
+## Actualización: ahora hay dos caminos válidos
 
-Vectora nunca llama a un modelo directamente. El punto de contacto con el modelo vive **dentro del sistema del cliente**, en su función registrada con `probe.register(fn)`, en el callback que le pasan a `probe.wrap(ctx, callback)`:
+Cuando se escribió la primera versión de este documento, Vectora nunca llamaba a un modelo directamente — el punto de contacto vivía siempre dentro del sistema del cliente, con su propia key. Eso sigue siendo cierto y sigue siendo válido (sección siguiente). Pero desde que se agregó el gateway de modelos de Vectora (`probe.completar()`, ver `docs/COMO-FUNCIONA-LA-CONEXION.md` § 5), también existe un segundo camino: Vectora llama al modelo por el cliente, con su propia key de proveedor, y le cobra créditos. Los dos conviven — el cliente elige cuál usar en cada sistema que conecta. Este documento sigue centrado en el primer camino (BYO key); para el segundo, ver el documento de arriba.
+
+## Primero, lo más importante: en el caso BYO-key (un cliente conectando su sistema con su propia key), no hay nada que cambiar en Vectora
+
+Vectora nunca llama a un modelo directamente en este camino. El punto de contacto con el modelo vive **dentro del sistema del cliente**, en su función registrada con `probe.register(fn)`, en el callback que le pasan a `probe.wrap(ctx, callback)`:
 
 ```typescript
 const respuesta = await probe.wrap(ctx, (modelo) =>
@@ -42,7 +46,9 @@ async function completar({ modelo, prompt }: { modelo: string; prompt: string })
 }
 ```
 
-**Las API keys viven en el sistema del cliente, nunca en Vectora.** El server de Vectora solo hace `POST /probe/ejecutar` al endpoint HTTP del cliente — no necesita, no pide, y no debería recibir ningún credential de proveedor de modelos. Esto es una propiedad de seguridad del diseño, no un detalle de implementación: mantenla así.
+**En el camino BYO-key, las API keys viven en el sistema del cliente, nunca en Vectora.** El server de Vectora solo hace `POST /probe/ejecutar` al endpoint HTTP del cliente — no necesita, no pide, y no debería recibir ningún credential de proveedor de modelos para este camino.
+
+Esto ya no es una regla absoluta para *todo* Vectora: el gateway (`server/src/engine/providerGateway.ts`, ver `docs/COMO-FUNCIONA-LA-CONEXION.md` § 5) sí guarda `OPENAI_API_KEY` en `server/.env`, a propósito — es la key de Vectora, para el camino donde Vectora paga y cobra créditos. La regla que sigue siendo absoluta: **la key de un CLIENTE nunca vive en Vectora** — si un cliente usa su propia cuenta de OpenAI/Anthropic/etc., esa credencial se queda en su proceso, siempre.
 
 ## Segundo: los fixtures demo de Fintech Andina (si quieres una demo con modelos reales)
 
@@ -92,4 +98,5 @@ No hay que tocar `probeBot`/`probeFraude`, el `register`, ni el `wrap` — sigue
 - [ ] (Opcional, producción) Juez LLM real de otra familia, misma firma que `juzgar()`.
 - [ ] (Opcional, producción) Agente generador con LLM real, misma firma que `generarPreguntas()`.
 - [ ] (Opcional, precisión de costos) Contrato del SDK extendido con `uso` real, con fallback a la heurística.
-- [ ] API keys de proveedores de modelos viven solo en el sistema del cliente. Nunca en `server/.env` ni en ningún lugar del código de Vectora.
+- [ ] Si el cliente usa su propia key (BYO), esa key vive solo en su sistema. Nunca en `server/.env` ni en ningún lugar del código de Vectora.
+- [ ] Si el cliente usa el gateway de Vectora, la única key de proveedor en `server/.env` es la de Vectora (hoy: `OPENAI_API_KEY`, solo OpenAI) — el cliente nunca ve ni necesita esa key, solo su propio `apiKey` de Vectora (`vec_live_...`).

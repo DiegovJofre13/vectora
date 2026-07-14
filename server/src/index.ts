@@ -7,6 +7,7 @@ import { registrarRutasEvaluaciones } from "./routes/evaluaciones.js";
 import { registrarRutasOrganizaciones } from "./routes/organizaciones.js";
 import { registrarRutasCalibracion } from "./routes/calibracion.js";
 import { registrarRutasGobernanza } from "./routes/gobernanza.js";
+import { registrarRutasGateway } from "./routes/gateway.js";
 
 const app = Fastify({ logger: true });
 
@@ -19,6 +20,7 @@ await registrarRutasEvaluaciones(app);
 await registrarRutasOrganizaciones(app);
 await registrarRutasCalibracion(app);
 await registrarRutasGobernanza(app);
+await registrarRutasGateway(app);
 
 const puerto = Number(process.env["PORT"] ?? 4310);
 app

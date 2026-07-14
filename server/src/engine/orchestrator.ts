@@ -4,6 +4,9 @@ import { generarPreguntas, type DocumentoKbInput } from "./generatorAgent.js";
 import { juzgar } from "./judge.js";
 import { scoreEstructuralConDetalle } from "./structuralScoring.js";
 import { estimarCostoUsd } from "./mockModelEngine.js";
+import { estimarCostoCorrida } from "./costEstimator.js";
+import { aplicarMargen } from "./billing.js";
+import { verificarSaldoSuficiente } from "./credits.js";
 import { estrategiaScoringParaTipo, type TipoTarea } from "./taskTypes.js";
 
 const CONCURRENCIA_MAXIMA = 4;
@@ -35,6 +38,7 @@ function esEnvolturaEstructural(v: unknown): v is EnvolturaEstructural {
 
 interface CasoDeUsoParaCorrida {
   id: string;
+  organizacionId: string;
   tipoTarea: string;
   probeUrl: string | null;
 }
@@ -80,6 +84,22 @@ export async function iniciarCorrida(
       requiereGenerador
         ? "No se pudieron generar preguntas: agrega al menos un documento del knowledge base."
         : "Agrega al menos un documento existente con su respuesta esperada para poder evaluar."
+    );
+  }
+
+  // Pre-flight de créditos: estimación conservadora (misma heurística que el paso de costo
+  // estimado del stepper) + margen, antes de gastar nada. Es un gate grueso — el gate preciso,
+  // que solo cobra por lo que de verdad pasa por el gateway, vive en routes/gateway.ts.
+  const estimacion = estimarCostoCorrida({
+    modelos,
+    numCasos: casosData.length,
+    tipoEstimacion: requiereGenerador ? "rag" : "estructural",
+  });
+  const { totalUsd: costoConMargen } = aplicarMargen(estimacion.costoTotalUsd);
+  const saldoAlcanza = await verificarSaldoSuficiente(casoDeUso.organizacionId, costoConMargen);
+  if (!saldoAlcanza) {
+    throw new Error(
+      `Créditos insuficientes: esta corrida costaría aprox. US$${costoConMargen.toFixed(2)} (con margen incluido). Carga créditos antes de correr.`
     );
   }
 
@@ -238,15 +258,12 @@ export async function ejecutarCorridaParaGobernanza(corridaId: string, probeUrl:
     data: { estado: "completado", completedAt: new Date(), costoRealUsd },
   });
 
-  await db.movimientoCreditos.create({
-    data: {
-      organizacionId: (await db.casoDeUso.findUniqueOrThrow({ where: { id: corrida.casoDeUsoId } })).organizacionId,
-      evaluacionCorridaId: corridaId,
-      creditosConsumidos: 1,
-      costoUsd: costoRealUsd,
-      descripcion: `Corrida de evaluación (${corrida.casosPrueba.length} casos × ${modelos.length} modelos)`,
-    },
-  });
+  // Nota: ya NO se registra acá un MovimientoCreditos de "1 crédito por corrida" — con el
+  // gateway de modelos, el cobro real ocurre por llamada, en tiempo real, dentro de
+  // routes/gateway.ts::registrarConsumo() (solo cuando el cliente de verdad usa el gateway).
+  // Loguear otro más acá duplicaría el cobro y además cobraría de más a quien use su propia
+  // API key (BYO), que no le cuesta nada a Vectora. `costoRealUsd` en EvaluacionCorrida queda
+  // como referencia informativa para el reporte, no como un cargo.
 
   await db.casoDeUso.update({ where: { id: corrida.casoDeUsoId }, data: { estado: "evaluado" } });
 }
