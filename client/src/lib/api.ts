@@ -149,9 +149,18 @@ export async function crearCasoDeUso(input: CrearCasoInput): Promise<CasoDeUsoRe
 export async function verificarConexion(
   casoId: string,
   probeUrl: string
-): Promise<{ ok: boolean; nombreSistema?: string; respuestaPrueba?: unknown; error?: string }> {
+): Promise<{ ok: boolean; nombreSistema?: string; respuestaPrueba?: unknown; tieneKb?: boolean; error?: string }> {
   try {
     return await req(`/api/casos-de-uso/${casoId}/verificar-conexion`, { method: "POST", body: JSON.stringify({ probeUrl }) });
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : "Error desconocido" };
+  }
+}
+
+/** Trae el knowledge base real desde el sistema del cliente (GET /probe/kb), si lo expuso con `probe.exponerKb()`. */
+export async function obtenerKbAutomatica(casoId: string, probeUrl: string): Promise<{ ok: boolean; docs?: KbDocInput[]; error?: string }> {
+  try {
+    return await req(`/api/casos-de-uso/${casoId}/obtener-kb`, { method: "POST", body: JSON.stringify({ probeUrl }) });
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : "Error desconocido" };
   }

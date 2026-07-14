@@ -51,14 +51,23 @@ export interface ProbeOptions {
   autoServe?: boolean;
   /**
    * API key de Vectora para usar `probe.completar()` (el gateway de modelos de Vectora, que
-   * llama al proveedor real y cobra créditos). Opcional: sin esto, `completar()` no está
-   * disponible y el cliente sigue llamando a los modelos con su propia key vía `wrap`.
+   * llama al proveedor real y cobra créditos). Sin esto, `completar()` no está disponible.
    * También se puede pasar por la variable de entorno VECTORA_API_KEY.
    */
   apiKey?: string;
   /** URL del server de Vectora para el gateway. Default: http://localhost:4310, o env VECTORA_GATEWAY_URL. */
   gatewayUrl?: string;
 }
+
+/** Documento de knowledge base — mismo shape que `KbDocInput` en el cliente y `kbDocSchema` en el server. */
+export interface KbDoc {
+  id?: string;
+  titulo: string;
+  contenido: string;
+}
+
+/** Respuesta de `GET /probe/kb`. */
+export type KbResponse = { ok: true; docs: KbDoc[] } | { ok: false; error: string };
 
 /** Parámetros para `probe.completar()` — el gateway de modelos de Vectora. */
 export interface CompletarParams {
@@ -97,4 +106,6 @@ export interface SaludResponse {
   registrado: boolean;
   nombreSistema?: string;
   version: string;
+  /** Si este sistema expuso un knowledge base con `probe.exponerKb()`, disponible en GET /probe/kb. */
+  tieneKb: boolean;
 }

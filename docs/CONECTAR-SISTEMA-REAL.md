@@ -22,6 +22,15 @@ Tu función de entrada recibe `(input, ctx)` y debe devolver `{ respuesta, conte
 
 Los tres patrones completos, con código, están en el paso 2 del stepper de Vectora (snippets copiables) y en `client/src/components/stepper/SnippetProbe.tsx`.
 
+### Opcional: exponer tu knowledge base para carga automática (Patrón A)
+
+Si tu sistema hace RAG (Patrón A), podés llamar a `probe.exponerKb(docs)` con tus documentos reales (`{ id?, titulo, contenido }[]`) — Vectora los va a poder traer automáticamente en el paso "Conecta tu sistema" de la UI (botón "Cargar automáticamente desde tu sistema"), en vez de que alguien los pegue a mano. Es enteramente opcional: sin esto, la carga sigue siendo manual (pegar texto o subir archivos .md/.txt) — ver `examples/cliente-demo/src/index.ts` para un ejemplo real (`probe.exponerKb(todosLosDocumentos())`).
+
+```typescript
+probe.register(responderConsulta);
+probe.exponerKb(misDocumentosReales); // opcional
+```
+
 ## 3. Declarar `completar` en el punto exacto de la llamada al modelo
 
 El único camino soportado: Vectora hace la llamada real al proveedor y te cobra créditos (costo real + margen). No necesitás ninguna API key de proveedor de modelos.
@@ -55,15 +64,18 @@ Esto ya existe, no hay que construir nada:
 
 ```bash
 curl http://localhost:4600/probe/salud
-# {"ok":true,"registrado":true,"version":"0.1.0"}
+# {"ok":true,"registrado":true,"version":"0.1.0","tieneKb":true}
 
 curl -X POST http://localhost:4600/probe/ejecutar \
   -H 'content-type: application/json' \
   -d '{"input":"una pregunta de prueba","modelo":"gpt-4o-mini"}'
 # {"ok":true,"latenciaMs":..., "respuesta":"...", "contextoRecuperado":[...]}
+
+curl http://localhost:4600/probe/kb
+# {"ok":true,"docs":[{"id":"01-onboarding","titulo":"...","contenido":"..."}, ...]}
 ```
 
-Si `registrado` da `false`, tu proceso arrancó pero nunca llamó `probe.register(fn)`. Si el `curl` a `/probe/ejecutar` da `{"ok":false,"error":...}`, el error viene de adentro de tu función registrada — el mensaje es literalmente lo que tiró tu excepción.
+Si `registrado` da `false`, tu proceso arrancó pero nunca llamó `probe.register(fn)`. Si el `curl` a `/probe/ejecutar` da `{"ok":false,"error":...}`, el error viene de adentro de tu función registrada — el mensaje es literalmente lo que tiró tu excepción. `tieneKb` en `/probe/salud` (y `GET /probe/kb`) solo existen si llamaste a `probe.exponerKb()` — ver la sección opcional del paso 2.
 
 ## 6. API keys
 

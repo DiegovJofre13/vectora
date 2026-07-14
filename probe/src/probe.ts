@@ -6,6 +6,7 @@ import type {
   EjecutarRequest,
   EjecutarResponse,
   FuncionRegistrada,
+  KbDoc,
   LlamadaModelo,
   ProbeOptions,
   SaludResponse,
@@ -26,6 +27,7 @@ const GATEWAY_URL_DEFAULT = "http://localhost:4310";
  */
 export class VectoraProbe {
   private fn: FuncionRegistrada | undefined;
+  private kbDocs: KbDoc[] | undefined;
   private server: Server | undefined;
   private readonly puerto: number;
   private readonly nombreSistema: string | undefined;
@@ -48,6 +50,20 @@ export class VectoraProbe {
    */
   register<TInput = unknown>(fn: FuncionRegistrada<TInput>): void {
     this.fn = fn as FuncionRegistrada;
+    if (this.autoServe && !this.server) {
+      this.levantarServidor();
+    }
+  }
+
+  /**
+   * Expone el knowledge base real de tu sistema (`GET /probe/kb`) para que
+   * Vectora lo importe automáticamente en el paso "Conecta tu sistema", en
+   * vez de que alguien lo pegue a mano en la UI. Es opcional: sin llamar a
+   * esto, la carga sigue siendo manual (pegar texto o subir archivos) desde
+   * la UI de Vectora — nada se rompe si no lo usás.
+   */
+  exponerKb(docs: KbDoc[]): void {
+    this.kbDocs = docs;
     if (this.autoServe && !this.server) {
       this.levantarServidor();
     }
@@ -138,7 +154,13 @@ export class VectoraProbe {
 
   /** Estado de salud: usado por el paso "verificar conexión" del onboarding. */
   salud(): SaludResponse {
-    return { ok: true, registrado: this.fn !== undefined, nombreSistema: this.nombreSistema, version: PROBE_VERSION };
+    return {
+      ok: true,
+      registrado: this.fn !== undefined,
+      nombreSistema: this.nombreSistema,
+      version: PROBE_VERSION,
+      tieneKb: this.kbDocs !== undefined,
+    };
   }
 
   /** Levanta el servidor HTTP local que Vectora llama de forma remota. Idempotente. */
@@ -153,6 +175,15 @@ export class VectoraProbe {
 
       if (req.method === "GET" && req.url === "/probe/salud") {
         enviar(200, this.salud());
+        return;
+      }
+
+      if (req.method === "GET" && req.url === "/probe/kb") {
+        if (!this.kbDocs) {
+          enviar(404, { ok: false, error: "Este sistema no expuso ningún knowledge base — llamá a probe.exponerKb(docs) para habilitar la carga automática." });
+          return;
+        }
+        enviar(200, { ok: true, docs: this.kbDocs });
         return;
       }
 
@@ -173,7 +204,7 @@ export class VectoraProbe {
         return;
       }
 
-      enviar(404, { ok: false, error: "Ruta no encontrada. Usa GET /probe/salud o POST /probe/ejecutar." });
+      enviar(404, { ok: false, error: "Ruta no encontrada. Usa GET /probe/salud, GET /probe/kb o POST /probe/ejecutar." });
     });
 
     this.server.listen(this.puerto, () => {

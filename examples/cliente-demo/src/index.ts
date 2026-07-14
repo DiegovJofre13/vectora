@@ -14,9 +14,13 @@
  *   - retrieval.ts  -> su propio vector store / búsqueda
  *   - este archivo  -> se mantiene casi igual: solo cambia construirPrompt
  *                      y la forma del `input` si su tarea no es RAG
+ *
+ * También llama a `probe.exponerKb()` con el knowledge base real, para que
+ * Vectora lo pueda importar automáticamente en el paso "Conecta tu sistema"
+ * en vez de que alguien lo pegue a mano — es opcional, ver docs/CONECTAR-SISTEMA-REAL.md.
  */
 import { probe, type VectoraCtx } from "@vectora/probe";
-import { buscarEnKb, totalDocumentos, type DocumentoKb } from "./retrieval.js";
+import { buscarEnKb, todosLosDocumentos, totalDocumentos, type DocumentoKb } from "./retrieval.js";
 import { completarStubLocal } from "./llm.js";
 
 const USA_GATEWAY_VECTORA = Boolean(process.env["VECTORA_API_KEY"]);
@@ -41,6 +45,9 @@ async function responderConsulta(pregunta: string, ctx: VectoraCtx) {
 }
 
 probe.register(responderConsulta);
+// Opcional: expone el knowledge base real para que Vectora lo importe automáticamente
+// en el paso "Conecta tu sistema" (GET /probe/kb), en vez de pegarlo a mano en la UI.
+probe.exponerKb(todosLosDocumentos());
 
 console.log(`[cliente-demo] knowledge base cargado: ${totalDocumentos()} documentos`);
 console.log(

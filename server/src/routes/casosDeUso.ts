@@ -82,7 +82,7 @@ export async function registrarRutasCasosDeUso(app: FastifyInstance): Promise<vo
 
     try {
       const saludRes = await fetchConTimeout(`${base}/probe/salud`);
-      const salud = (await saludRes.json()) as { ok: boolean; registrado: boolean; nombreSistema?: string };
+      const salud = (await saludRes.json()) as { ok: boolean; registrado: boolean; nombreSistema?: string; tieneKb?: boolean };
       if (!salud.ok || !salud.registrado) {
         reply.code(422);
         return { ok: false, error: "El probe respondió pero no tiene ninguna función registrada (probe.register(fn))." };
@@ -100,7 +100,38 @@ export async function registrarRutasCasosDeUso(app: FastifyInstance): Promise<vo
       }
 
       await db.casoDeUso.update({ where: { id: req.params.id }, data: { probeUrl, estado: "conectado" } });
-      return { ok: true, nombreSistema: salud.nombreSistema, respuestaPrueba: ejecutar.respuesta };
+      // tieneKb (opcional, viene de versiones del SDK con probe.exponerKb()) le avisa a la UI que
+      // puede ofrecer la carga automática del knowledge base en vez de que se pegue a mano.
+      return { ok: true, nombreSistema: salud.nombreSistema, respuestaPrueba: ejecutar.respuesta, tieneKb: Boolean(salud.tieneKb) };
+    } catch (err) {
+      reply.code(422);
+      const esTimeout = err instanceof Error && err.name === "AbortError";
+      return {
+        ok: false,
+        error: esTimeout
+          ? `${probeUrl} no respondió dentro de ${TIMEOUT_VERIFICACION_MS / 1000}s (timeout).`
+          : `No se pudo conectar a ${probeUrl}: ${err instanceof Error ? err.message : "error desconocido"}`,
+      };
+    }
+  });
+
+  app.post<{ Params: { id: string } }>("/api/casos-de-uso/:id/obtener-kb", async (req, reply) => {
+    const parsed = verificarConexionSchema.safeParse(req.body);
+    if (!parsed.success) {
+      reply.code(400);
+      return { ok: false, error: parsed.error.issues.map((i) => i.message).join("; ") };
+    }
+    const { probeUrl } = parsed.data;
+    const base = probeUrl.replace(/\/$/, "");
+
+    try {
+      const kbRes = await fetchConTimeout(`${base}/probe/kb`);
+      const kb = (await kbRes.json()) as { ok: boolean; error?: string; docs?: { id?: string; titulo: string; contenido: string }[] };
+      if (!kb.ok) {
+        reply.code(422);
+        return { ok: false, error: kb.error ?? "El sistema no expuso ningún knowledge base." };
+      }
+      return { ok: true, docs: kb.docs ?? [] };
     } catch (err) {
       reply.code(422);
       const esTimeout = err instanceof Error && err.name === "AbortError";

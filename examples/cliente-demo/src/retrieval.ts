@@ -57,3 +57,7 @@ export function buscarEnKb(pregunta: string, k = 3): DocumentoKb[] {
 export function totalDocumentos(): number {
   return KB.length;
 }
+
+export function todosLosDocumentos(): DocumentoKb[] {
+  return KB;
+}

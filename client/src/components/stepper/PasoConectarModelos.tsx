@@ -1,8 +1,9 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { SnippetProbe } from "./SnippetProbe.js";
 import {
   estimarCosto,
   obtenerCatalogo,
+  obtenerKbAutomatica,
   sugerirModelosApi,
   verificarConexion,
   type DocumentoExistenteInput,
@@ -30,6 +31,7 @@ const DOCS_EJEMPLO: DocExistenteForm[] = [
 export interface DatosConexionModelos {
   probeUrl: string;
   nombreSistema?: string;
+  tieneKb?: boolean;
   modelos: string[];
   kbDocs?: KbDocInput[];
   documentosExistentes?: DocumentoExistenteInput[];
@@ -72,6 +74,10 @@ export function PasoConectarModelos({
   const [verificado, setVerificado] = useState(Boolean(valorInicial));
   const [nombreSistema, setNombreSistema] = useState<string | null>(valorInicial?.nombreSistema ?? null);
   const [errorConexion, setErrorConexion] = useState<string | null>(null);
+  const [tieneKbDisponible, setTieneKbDisponible] = useState(Boolean(valorInicial?.tieneKb));
+  const [cargandoKbAuto, setCargandoKbAuto] = useState(false);
+  const [errorKbAuto, setErrorKbAuto] = useState<string | null>(null);
+  const inputArchivosRef = useRef<HTMLInputElement>(null);
 
   const [catalogo, setCatalogo] = useState<ModeloCatalogo[]>([]);
   const [sugeridos, setSugeridos] = useState<string[]>([]);
@@ -127,10 +133,36 @@ export function PasoConectarModelos({
     if (res.ok) {
       setVerificado(true);
       setNombreSistema(res.nombreSistema ?? null);
+      setTieneKbDisponible(Boolean(res.tieneKb));
     } else {
       setVerificado(false);
+      setTieneKbDisponible(false);
       setErrorConexion(res.error ?? "No se pudo verificar la conexión.");
     }
+  }
+
+  async function handleCargarKbAutomatica() {
+    setCargandoKbAuto(true);
+    setErrorKbAuto(null);
+    const res = await obtenerKbAutomatica(casoId, probeUrl);
+    setCargandoKbAuto(false);
+    if (res.ok) {
+      setKbDocs(res.docs ?? []);
+    } else {
+      setErrorKbAuto(res.error ?? "No se pudo traer el knowledge base.");
+    }
+  }
+
+  async function handleSubirArchivos(files: FileList | null) {
+    if (!files || files.length === 0) return;
+    const nuevos = await Promise.all(
+      [...files].map(async (archivo) => ({
+        titulo: archivo.name.replace(/\.(md|txt)$/i, ""),
+        contenido: (await archivo.text()).trim(),
+      }))
+    );
+    setKbDocs((prev) => [...prev, ...nuevos.filter((d) => d.contenido.length > 0)]);
+    if (inputArchivosRef.current) inputArchivosRef.current.value = "";
   }
 
   function toggleModelo(id: string, gatewaySoportado: boolean) {
@@ -205,6 +237,22 @@ export function PasoConectarModelos({
 
         {requiereGenerador ? (
           <div className="mt-3 space-y-3">
+            {tieneKbDisponible && (
+              <div className="rounded-card border border-marca/30 bg-marca-tinte p-3 text-sm">
+                <p className="text-tinta/70">
+                  Tu sistema expuso su knowledge base real (<code className="font-mono text-xs">probe.exponerKb()</code>) — podés traerlo
+                  automáticamente en vez de pegarlo a mano.
+                </p>
+                <button
+                  onClick={handleCargarKbAutomatica}
+                  disabled={cargandoKbAuto}
+                  className="mt-2 rounded-card bg-marca px-3 py-1.5 text-sm font-medium text-white disabled:opacity-40"
+                >
+                  {cargandoKbAuto ? "Cargando…" : "Cargar automáticamente desde tu sistema"}
+                </button>
+                {errorKbAuto && <p className="mt-2 text-xs text-coral">{errorKbAuto}</p>}
+              </div>
+            )}
             {kbDocs.map((doc, i) => (
               <div key={i} className="rounded-card border border-linea p-3">
                 <div className="flex items-center justify-between gap-2">
@@ -227,13 +275,27 @@ export function PasoConectarModelos({
                 />
               </div>
             ))}
-            <div className="flex gap-2">
+            <div className="flex flex-wrap items-center gap-2">
               <button
                 onClick={() => setKbDocs((prev) => [...prev, { titulo: "", contenido: "" }])}
                 className="rounded-card border border-dashed border-linea px-3 py-1.5 text-sm hover:border-marca/40"
               >
                 + Agregar documento
               </button>
+              <button
+                onClick={() => inputArchivosRef.current?.click()}
+                className="rounded-card border border-dashed border-linea px-3 py-1.5 text-sm hover:border-marca/40"
+              >
+                Subir archivo(s) .md/.txt
+              </button>
+              <input
+                ref={inputArchivosRef}
+                type="file"
+                accept=".md,.txt"
+                multiple
+                className="hidden"
+                onChange={(e) => void handleSubirArchivos(e.target.files)}
+              />
               <button onClick={() => setKbDocs(KB_EJEMPLO)} className="rounded-card px-3 py-1.5 text-sm text-marca hover:underline">
                 Usar KB de ejemplo
               </button>
@@ -379,6 +441,7 @@ export function PasoConectarModelos({
             onSiguiente({
               probeUrl,
               nombreSistema: nombreSistema ?? undefined,
+              tieneKb: tieneKbDisponible,
               modelos: [...seleccionados],
               kbDocs: requiereGenerador ? kbDocs : undefined,
               documentosExistentes: requiereGenerador ? undefined : documentosExistentesPayload,

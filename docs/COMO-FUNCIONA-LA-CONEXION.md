@@ -26,6 +26,13 @@ UI de Vectora              Server de Vectora                    Sistema del clie
      |                            |<--{ok, respuesta, ...}--------------|
      |<--conexión verificada------|                                     |
      |                            |                                     |
+     | 2b. (opcional) Cargar KB   |                                     |
+     |     automáticamente       |                                     |
+     |--------------------------->| GET /probe/kb                       |
+     |                            |------------------------------------>|
+     |                            |<--{ok, docs:[...]}------------------|
+     |<--kbDocs precargados-------|                                     |
+     |                            |                                     |
      | 3. Elegir modelos + KB /   |                                     |
      |    documentos existentes   |                                     |
      |--------------------------->|                                     |
@@ -71,6 +78,7 @@ UI de Vectora              Server de Vectora                    Sistema del clie
 
 Código real de cada paso:
 - Paso 2 — `server/src/routes/casosDeUso.ts`, handler `POST /api/casos-de-uso/:id/verificar-conexion`.
+- Paso 2b (opcional) — `server/src/routes/casosDeUso.ts`, handler `POST /api/casos-de-uso/:id/obtener-kb`, que hace `GET {probeUrl}/probe/kb`. Solo existe si el cliente llamó `probe.exponerKb(docs)` (`probe.ts`) — si no, `/probe/kb` devuelve 404 y la UI no muestra el botón (lo sabe por el campo `tieneKb` que ya viene en la respuesta de `verificar-conexion`, tomado de `salud()`).
 - Paso 4 (crear corrida) — `server/src/engine/orchestrator.ts::iniciarCorrida()`.
 - Paso 4 (ejecutar, fire-and-forget) — `iniciarCorrida()` llama `void ejecutarCorridaParaGobernanza(...)` sin `await` y sin bloquear el `return { corridaId }`. La UI empieza a hacer polling inmediatamente.
 - El loop de ejecución — `ejecutarCorridaParaGobernanza()`, que arma una tarea por cada `(CasoPrueba, modelo)` y las corre con `crearLimitador(CONCURRENCIA_MAXIMA)` (`server/src/lib/pLimit.ts`), `CONCURRENCIA_MAXIMA = 4` (`orchestrator.ts:9`). No es "manda las 150 llamadas de una" — hay como máximo 4 llamadas HTTP al probe del cliente abiertas a la vez.
@@ -161,12 +169,30 @@ export type FuncionRegistrada<TInput = unknown> = (
   ctx: VectoraCtx
 ) => Promise<ProbeResultado>;
 
-/** Llamada al modelo que el cliente envuelve con `probe.wrap(ctx, llmCall)`. */
+/** Parámetros y resultado de `probe.completar()` — el gateway de modelos de Vectora. */
+export interface CompletarParams {
+  prompt: string;
+  formato?: "json";  // fuerza JSON válido (Patrón B)
+}
+export interface CompletarResultado {
+  texto: string;
+}
+
+/** Documento de knowledge base, y respuesta de GET /probe/kb. */
+export interface KbDoc {
+  id?: string;
+  titulo: string;
+  contenido: string;
+}
+export type KbResponse = { ok: true; docs: KbDoc[] } | { ok: false; error: string };
+
+/** Llamada al modelo que el cliente envuelve con `probe.wrap(ctx, llmCall)` — legacy/interno, ver § 2 y § 5. */
 export type LlamadaModelo<T = unknown> = (modelo: string) => Promise<T>;
 ```
 
 - `register(fn)` — obligatorio, una vez por proceso. `fn` puede ser genérico en `TInput`, pero en tiempo de ejecución no hay validación de tipo — lo que llega por HTTP se castea, no se valida contra un schema.
-- `wrap(ctx, llamadaModelo)` — obligatorio en el punto donde se llama al modelo. Retorna lo que sea que devuelva `llamadaModelo` (genérico `T`), sin tocarlo — el cliente decide la forma de `T`.
+- `completar(ctx, { prompt, formato? })` — obligatorio en el punto donde se llama al modelo (ver § 5). `wrap(ctx, llamadaModelo)` sigue existiendo mecánicamente (retorna lo que devuelva `llamadaModelo`, genérico en `T`, sin tocarlo), pero ya no se documenta ni se muestra para sistemas reales — solo lo usan internamente los fixtures de demo de Vectora.
+- `exponerKb(docs)` — opcional, en cualquier punto después de `register`. Habilita `GET /probe/kb` y pone `tieneKb: true` en `salud()`. Sin llamarlo, `/probe/kb` responde 404 y la carga de KB en la UI sigue siendo manual (pegar texto o subir archivos).
 - `contextoRecuperado` es **opcional**. Si no lo mandas (ej. un caso que no hace retrieval), el juez igual corre, pero `groundedness` se calcula contra un contexto vacío — en la práctica da groundedness ≈ 0 siempre, porque no hay nada contra qué comparar. Para tareas RAG de verdad, mandar `contextoRecuperado` no es opcional en la práctica, aunque el tipo lo permita.
 
 ## 5. El gateway de Vectora: quién hace la llamada al modelo
@@ -218,7 +244,7 @@ En orden de qué tan probable es que te muerda esta semana:
 
 1. **No hay forma de detectar si el cliente ignora el parámetro `modelo`, ni de impedir que llame a un proveedor con su propia key en vez de usar `completar()`.** Ver sección 3. "Solo se puede usar el gateway de Vectora" es una política de producto (nada lo muestra ni lo documenta), no una garantía técnica — el SDK no puede inspeccionar el código de la función registrada. Si el reporte muestra a todos los modelos con métricas casi idénticas, sospecha de esto primero.
 2. **Sin autenticación ni HTTPS entre Vectora y el probe del cliente** (dirección Vectora→cliente). Solo apto para correr en `localhost` o detrás de un túnel de confianza. Ver sección 6. El gateway (dirección cliente→Vectora) sí está autenticado.
-3. **El gateway solo soporta modelos de OpenAI.** `claude-3-5-sonnet`, `gemini-1-5-flash`, `llama-3-1-70b` no tienen key configurada — `probe.completar()` con esos ids tira un error claro (`modeloSoportadoPorGateway` en `providerGateway.ts`), no cae a un mock silencioso.
+3. **El gateway solo soporta modelos de OpenAI.** `claude-3-5-sonnet`, `gemini-1-5-flash`, `llama-3-1-70b` no tienen key configurada — `probe.completar()` con esos ids tira un error claro (`modeloSoportadoPorGateway` en `providerGateway.ts`), no cae a un mock silencioso. El panel de la UI ya los muestra deshabilitados ("próximamente") y `POST /evaluaciones` los rechaza con 400 si igual llegan — pero si algo llama a `probe.completar()` directamente con uno de esos ids (sin pasar por el panel), el error solo aparece ahí, por caso.
 4. **El pre-check de saldo en `iniciarCorrida()` es una estimación, no el costo exacto**, y bloquea la corrida completa asumiendo que se va a usar el gateway — aunque el cliente termine usando su propia key (en cuyo caso no se le cobra nada, pero el pre-check igual pudo haber bloqueado si el saldo estaba en cero). Ver sección 5.
 5. **Sin reconexión si el server de Vectora se reinicia a mitad de una corrida.** La corrida queda huérfana en estado "corriendo" para siempre; hay que volver a lanzarla.
 6. **Sin reintentos automáticos** ante timeout o error puntual — un fallo transitorio de red se cuenta como fallo definitivo de ese caso×modelo. Esto aplica también al gateway: si OpenAI falla una vez, no se reintenta, y no se cobra (el error se propaga antes de registrar el consumo).

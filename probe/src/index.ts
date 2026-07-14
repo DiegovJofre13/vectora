@@ -12,6 +12,8 @@ export type {
   SaludResponse,
   CompletarParams,
   CompletarResultado,
+  KbDoc,
+  KbResponse,
 } from "./types.js";
 
 import { crearProbe } from "./probe.js";
@@ -20,6 +22,6 @@ import { crearProbe } from "./probe.js";
  * Singleton por defecto. Cubre el caso común (un sistema por proceso):
  *   import { probe } from "@vectora/probe";
  *   probe.register(miFuncion);
- *   await probe.wrap(ctx, (modelo) => miClienteLLM.completar({ modelo, prompt }));
+ *   const { texto } = await probe.completar(ctx, { prompt });
  */
 export const probe = crearProbe();

@@ -27,7 +27,7 @@ Con el server de Vectora corriendo (`npm run dev` en la raíz, o al menos `npm r
 1. En la UI de Vectora, "+ Nuevo caso de uso" → tipo de tarea "RAG" o "Soporte conversacional".
 2. Paso 2, "Conecta tu sistema" → `http://localhost:4600` → "Verificar conexión".
 3. Deberías ver "✓ Conectado" — eso confirma que Vectora pudo invocar `responderConsulta` de verdad, no un mock.
-4. Podés usar el knowledge base real de este ejemplo pegando el contenido de `kb/*.md` en el paso de "Knowledge base" del stepper (o usar "Usar KB de ejemplo", que trae contenido distinto, del fixture interno de Vectora — no son la misma base).
+4. Este ejemplo llama a `probe.exponerKb()` (`src/index.ts`), así que en el paso "Knowledge base" del stepper va a aparecer un botón "Cargar automáticamente desde tu sistema" — lo trae en vivo desde `kb/*.md`, sin copiar/pegar nada. También podés pegarlo a mano, subir los `.md` como archivo, o usar "Usar KB de ejemplo" (contenido distinto, del fixture interno de Vectora — no es la misma base).
 
 También podés probarlo a mano, sin la UI:
 
