@@ -8,9 +8,8 @@ const SNIPPETS: Record<string, { etiqueta: string; codigo: string }> = {
 async function responderConsulta(pregunta, ctx) {
   const docs = await miVectorStore.buscar(pregunta, { k: 5 });
   const prompt = construirPrompt(pregunta, docs);
-  const respuesta = await probe.wrap(ctx, (modelo) =>
-    miClienteLLM.completar({ modelo, prompt }));
-  return { respuesta, contextoRecuperado: docs };
+  const { texto } = await probe.completar(ctx, { prompt });
+  return { respuesta: texto, contextoRecuperado: docs };
 }
 probe.register(responderConsulta);`,
   },
@@ -19,10 +18,9 @@ probe.register(responderConsulta);`,
     codigo: `import { probe } from "@vectora/probe";
 
 async function extraerDatos(input, ctx) {
-  const prompt = \`Extrae los campos relevantes:\\n\${input.documento}\`;
-  const json = await probe.wrap(ctx, (modelo) =>
-    miClienteLLM.completarJSON({ modelo, prompt }));
-  return { respuesta: json };
+  const prompt = \`Extrae los campos relevantes en JSON:\\n\${input.documento}\`;
+  const { texto } = await probe.completar(ctx, { prompt, formato: "json" });
+  return { respuesta: JSON.parse(texto) };
 }
 probe.register(extraerDatos);`,
   },
@@ -30,6 +28,10 @@ probe.register(extraerDatos);`,
     etiqueta: "Patrón C — sistema detrás de una API HTTP",
     codigo: `import { probe } from "@vectora/probe";
 
+// Tu backend interno, en el punto donde llama al modelo, debería llamar
+// al gateway de Vectora (POST /api/gateway/completar con tu apiKey) en
+// vez de a su propio proveedor — mismo mecanismo que completar(), en
+// HTTP crudo si tu backend no es Node/TypeScript.
 async function responderViaAPI(pregunta, ctx) {
   const modelo = probe.modeloActual(ctx);
   const r = await fetch("https://mi-backend.interno/chat", {

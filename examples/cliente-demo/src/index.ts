@@ -3,23 +3,21 @@
  * plantilla para que un cliente real vea exactamente qué reemplazar. Usa
  * @vectora/probe de verdad — no hay ningún atajo especial para este ejemplo.
  *
- * Muestra las dos formas de llamar al modelo, elegidas en tiempo de arranque
- * según qué credencial encuentre (ver docs/COMO-FUNCIONA-LA-CONEXION.md):
- *   - VECTORA_API_KEY configurada -> usa el gateway de Vectora (probe.completar):
- *     Vectora llama al proveedor y te cobra créditos, vos no necesitás tu
- *     propia key del proveedor.
- *   - si no, OPENAI_API_KEY configurada -> tu propia key, vía probe.wrap (ver llm.ts).
- *   - si no hay ninguna, un stub local (ver llm.ts) para que el ejemplo funcione igual.
+ * El único camino soportado para llamar al modelo es el gateway de Vectora
+ * (`probe.completar()`) — Vectora paga al proveedor real y cobra créditos,
+ * el cliente nunca necesita su propia API key de proveedor. Ver
+ * docs/COMO-FUNCIONA-LA-CONEXION.md § 5. Sin VECTORA_API_KEY configurada,
+ * este ejemplo cae a un stub local (ver llm.ts) para poder correrlo sin
+ * configuración — no hay ninguna alternativa con key propia del cliente.
  *
  * Qué reemplazaría un cliente real:
  *   - retrieval.ts  -> su propio vector store / búsqueda
- *   - llm.ts        -> su propio cliente de modelos, si prefiere seguir usando su key
  *   - este archivo  -> se mantiene casi igual: solo cambia construirPrompt
  *                      y la forma del `input` si su tarea no es RAG
  */
 import { probe, type VectoraCtx } from "@vectora/probe";
 import { buscarEnKb, totalDocumentos, type DocumentoKb } from "./retrieval.js";
-import { completar } from "./llm.js";
+import { completarStubLocal } from "./llm.js";
 
 const USA_GATEWAY_VECTORA = Boolean(process.env["VECTORA_API_KEY"]);
 
@@ -34,7 +32,7 @@ async function responderConsulta(pregunta: string, ctx: VectoraCtx) {
 
   const texto = USA_GATEWAY_VECTORA
     ? (await probe.completar(ctx, { prompt })).texto
-    : (await probe.wrap(ctx, (modelo) => completar({ modelo, prompt, contexto: docs.map((d) => d.contenido) }))).texto;
+    : (await completarStubLocal({ modelo: ctx.modelo, contexto: docs.map((d) => d.contenido) })).texto;
 
   return {
     respuesta: texto,
@@ -44,14 +42,11 @@ async function responderConsulta(pregunta: string, ctx: VectoraCtx) {
 
 probe.register(responderConsulta);
 
-const openAiConfigurada = Boolean(process.env["OPENAI_API_KEY"]);
 console.log(`[cliente-demo] knowledge base cargado: ${totalDocumentos()} documentos`);
 console.log(
   `[cliente-demo] ${
     USA_GATEWAY_VECTORA
       ? "usando el gateway de Vectora (VECTORA_API_KEY configurada) — Vectora llama al modelo y cobra créditos"
-      : openAiConfigurada
-        ? "OPENAI_API_KEY configurada — gpt-4o/gpt-4o-mini responden con modelos reales, con tu propia key"
-        : "sin ninguna credencial configurada — todas las respuestas son un stub local"
+      : "sin VECTORA_API_KEY — todas las respuestas son un stub local (cargá créditos y configurá la key para modelos reales)"
   }`
 );

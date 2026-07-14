@@ -31,7 +31,7 @@ export interface ResultadoGateway {
   costoBaseUsd: number;
 }
 
-export async function completarConGateway(modelo: string, prompt: string): Promise<ResultadoGateway> {
+export async function completarConGateway(modelo: string, prompt: string, formato?: "json"): Promise<ResultadoGateway> {
   const precios = PRECIOS_OPENAI[modelo];
   if (!precios) {
     throw new Error(`El gateway de Vectora todavía no soporta el modelo "${modelo}" (solo modelos de OpenAI por ahora).`);
@@ -49,7 +49,14 @@ export async function completarConGateway(modelo: string, prompt: string): Promi
     const res = await fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
       headers: { "content-type": "application/json", authorization: `Bearer ${apiKey}` },
-      body: JSON.stringify({ model: modelo, messages: [{ role: "user", content: prompt }], temperature: 0.2 }),
+      body: JSON.stringify({
+        model: modelo,
+        messages: [{ role: "user", content: prompt }],
+        temperature: 0.2,
+        // OpenAI exige que el prompt mencione "JSON" cuando se pide este response_format —
+        // responsabilidad del cliente al armar su prompt para Patrón B (extracción/clasificación).
+        ...(formato === "json" ? { response_format: { type: "json_object" } } : {}),
+      }),
       signal: controlador.signal,
     });
 

@@ -17,30 +17,29 @@ npm install @vectora/probe
 Tu función de entrada recibe `(input, ctx)` y debe devolver `{ respuesta, contextoRecuperado? }`. Elegí el patrón según tu sistema:
 
 - **Patrón A — bot RAG** (tenés retrieval propio): `contextoRecuperado` es obligatorio en la práctica — sin él, el juez no puede medir groundedness. Ver `examples/cliente-demo/src/index.ts`.
-- **Patrón B — extracción/clasificación** (input es un documento existente, no una pregunta): no hay retrieval, `contextoRecuperado` se omite.
-- **Patrón C — tu sistema vive detrás de tu propia API HTTP**: usá `probe.modeloActual(ctx)` para saber qué modelo mandarle a tu API, en vez de `wrap` directo sobre la llamada al LLM.
+- **Patrón B — extracción/clasificación** (input es un documento existente, no una pregunta): no hay retrieval, `contextoRecuperado` se omite, y `completar()` se llama con `formato: "json"`.
+- **Patrón C — tu sistema vive detrás de tu propia API HTTP**: usá `probe.modeloActual(ctx)` para saber qué modelo mandarle a tu API — tu backend, en el punto donde llama al modelo, debería llamar al gateway de Vectora (ver paso 3).
 
 Los tres patrones completos, con código, están en el paso 2 del stepper de Vectora (snippets copiables) y en `client/src/components/stepper/SnippetProbe.tsx`.
 
-## 3. Declarar `wrap` (tu key) o `completar` (el gateway de Vectora) en el punto exacto de la llamada al modelo
+## 3. Declarar `completar` en el punto exacto de la llamada al modelo
 
-**Con tu propia API key del proveedor:**
-
-```typescript
-const respuesta = await probe.wrap(ctx, (modelo) =>
-  miClienteLLM.completar({ modelo, prompt })
-);
-```
-
-Chequeo crítico: **tu `miClienteLLM.completar` tiene que usar de verdad el parámetro `modelo`** para decidir a qué proveedor/modelo llamar. Si lo ignora (modelo hardcodeado), Vectora no lo detecta solo — el síntoma es que el reporte final muestra a todos los modelos del panel con métricas casi idénticas. Ver `docs/COMO-FUNCIONA-LA-CONEXION.md` § 3.
-
-**Sin key propia, con el gateway de Vectora (Vectora llama al modelo y te cobra créditos):**
+El único camino soportado: Vectora hace la llamada real al proveedor y te cobra créditos (costo real + margen). No necesitás ninguna API key de proveedor de modelos.
 
 ```typescript
 const { texto } = await probe.completar(ctx, { prompt });
 ```
 
+Para extracción/clasificación (Patrón B), pedile JSON al modelo:
+
+```typescript
+const { texto } = await probe.completar(ctx, { prompt, formato: "json" });
+const datos = JSON.parse(texto);
+```
+
 Requiere pasar tu `apiKey` de Vectora al crear el probe (`crearProbe({ apiKey })` o env var `VECTORA_API_KEY`) — la sacás de la pestaña Gobernanza → Créditos en la UI. Ver `docs/COMO-FUNCIONA-LA-CONEXION.md` § 5. Solo modelos de OpenAI por ahora.
+
+*(El SDK todavía tiene `probe.wrap()`, que le pasaría el modelo a un callback tuyo con tu propia key — pero eso no es un camino soportado ni documentado para sistemas reales. Ver `docs/COMO-FUNCIONA-LA-CONEXION.md` § 2 y § 5 para el porqué.)*
 
 ## 4. Arrancar tu sistema
 
@@ -68,13 +67,11 @@ Si `registrado` da `false`, tu proceso arrancó pero nunca llamó `probe.registe
 
 ## 6. API keys
 
-**Si usás tu propia key de proveedor (Opción A del paso 3):** va en **tu** proceso (variables de entorno de tu sistema, ej. `OPENAI_API_KEY`), nunca en Vectora. Ver `examples/cliente-demo/src/llm.ts` para un ejemplo funcional con OpenAI real.
-
-**Si usás el gateway de Vectora (Opción B):** tu `apiKey` de Vectora (`vec_live_...`) también va en tu proceso, como env var `VECTORA_API_KEY` — identifica a tu organización para cobrarle créditos, no da acceso a nada de Vectora más allá de `POST /api/gateway/completar`. Cargá créditos primero (Gobernanza → Créditos → "Cargar créditos") o la corrida se bloquea por saldo insuficiente.
+Tu `apiKey` de Vectora (`vec_live_...`) va en tu proceso, como env var `VECTORA_API_KEY` — identifica a tu organización para cobrarle créditos, no da acceso a nada de Vectora más allá de `POST /api/gateway/completar`. No necesitás ninguna API key de proveedor de modelos (OpenAI, Anthropic, etc.) en tu sistema. Cargá créditos primero (Gobernanza → Créditos → "Cargar créditos") o la corrida se bloquea por saldo insuficiente.
 
 ## 7. Recién ahí, correr una evaluación
 
-Paso 3 del stepper: confirmás el costo estimado y corrés. Cada caso × cada modelo del panel es un `POST /probe/ejecutar` real a tu sistema, con hasta 4 en simultáneo. Si tu sistema usa el gateway de Vectora, además cada llamada al modelo te descuenta créditos en tiempo real — si el saldo llega a cero a mitad de la corrida, esos casos puntuales van a fallar (quedan marcados como error en el reporte, no frenan el resto).
+Paso 3 del stepper: confirmás el costo estimado y corrés. Cada caso × cada modelo del panel es un `POST /probe/ejecutar` real a tu sistema, con hasta 4 en simultáneo, y cada llamada al modelo (vía `completar()`) te descuenta créditos en tiempo real — si el saldo llega a cero a mitad de la corrida, esos casos puntuales van a fallar (quedan marcados como error en el reporte, no frenan el resto).
 
 ## Antes de conectar algo que no corre en tu misma máquina
 

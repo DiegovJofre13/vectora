@@ -22,7 +22,7 @@ UI de Vectora              Server de Vectora                    Sistema del clie
      |                            |<--{ok, registrado, nombreSistema}---|
      |                            | POST /probe/ejecutar (1 caso de prueba, modelo fijo) |
      |                            |------------------------------------>| fn(input, ctx)
-     |                            |                                     |   probe.wrap(ctx, llamar) -> LLM
+     |                            |                                     |   probe.completar(ctx, {prompt}) -> gateway -> LLM real
      |                            |<--{ok, respuesta, ...}--------------|
      |<--conexión verificada------|                                     |
      |                            |                                     |
@@ -48,9 +48,9 @@ UI de Vectora              Server de Vectora                    Sistema del clie
      |                            |  casoPruebaId}                       |
      |                            |------------------------------------>| fn(input, ctx)
      |                            |                                     |   ctx.modelo = "gpt-4o" (ej.)
-     |                            |                                     |   probe.wrap(ctx, (modelo) =>
-     |                            |                                     |     miClienteLLM.completar({modelo, prompt}))
-     |                            |                                     |   -> el modelo pedido, no otro
+     |                            |                                     |   probe.completar(ctx, { prompt })
+     |                            |                                     |   -> POST al gateway de Vectora ->
+     |                            |                                     |      OpenAI real con ESE modelo
      |                            |<--{ok, respuesta, contextoRecuperado,|
      |                            |    latenciaMs}-----------------------|
      |                            | juzgar() (RAG) o scoreEstructural()  |
@@ -78,18 +78,7 @@ Código real de cada paso:
 
 ## 2. Cómo se intercambia el modelo, exactamente
 
-Este es el mecanismo completo, sin nada oculto (`probe/src/probe.ts:54-59`):
-
-```typescript
-async wrap<T>(ctx: VectoraCtx, llamadaModelo: LlamadaModelo<T>): Promise<T> {
-  const inicio = Date.now();
-  const resultado = await llamadaModelo(ctx.modelo);
-  ctx._metrica = { latenciaMs: Date.now() - inicio, modelo: ctx.modelo };
-  return resultado;
-}
-```
-
-`wrap` no decide nada — el modelo ya viene decidido en `ctx.modelo` **antes** de que `wrap` se ejecute. `ctx` lo arma el propio SDK, no el cliente, en `probe.ejecutar()` (`probe.ts:76-80`):
+`ctx` lo arma el propio SDK, no el cliente, en `probe.ejecutar()` (`probe.ts:76-80`):
 
 ```typescript
 const ctx: VectoraCtx = {
@@ -110,24 +99,37 @@ const resultado = await llamarProbe(probeUrl, {
 });
 ```
 
-Entonces la cadena completa es: **Vectora decide el modelo → lo manda en el JSON del POST → el SDK lo mete en `ctx.modelo` → `wrap` se lo pasa como argumento al callback del cliente → el cliente decide qué hacer con ese string.**
+El cliente lo usa llamando a `probe.completar(ctx, { prompt })` (`probe.ts`, ver método `completar`), que manda `ctx.modelo` tal cual al gateway de Vectora:
 
-`wrap` no le exige nada al callback salvo que sea `(modelo: string) => Promise<T>` — el tipo es `LlamadaModelo<T> = (modelo: string) => Promise<T>` (`probe/src/types.ts:38`). El SDK no valida que el callback realmente use el parámetro `modelo` para nada. Eso es responsabilidad 100% del cliente — ver la sección de supuestos frágiles.
+```typescript
+async completar(ctx: VectoraCtx, params: CompletarParams): Promise<CompletarResultado> {
+  const res = await fetch(`${this.gatewayUrl}/api/gateway/completar`, {
+    method: "POST",
+    headers: { authorization: `Bearer ${this.apiKey}` },
+    body: JSON.stringify({ modelo: ctx.modelo, prompt: params.prompt, formato: params.formato }),
+  });
+  // ...
+}
+```
 
-Para el patrón C (sistema detrás de su propia API HTTP, sin `wrap` directo sobre la llamada al LLM), existe `modeloActual(ctx)` (`probe.ts:62-64`), que es literalmente `return ctx.modelo` — mismo mecanismo, solo que el cliente lo lee explícitamente en vez de que se lo pase `wrap`.
+Entonces la cadena completa es: **Vectora decide el modelo → lo manda en el JSON del POST a `/probe/ejecutar` → el SDK lo mete en `ctx.modelo` → `completar()` se lo manda al gateway de Vectora → el gateway llama al proveedor real con ese modelo exacto.** A diferencia del mecanismo anterior (`wrap`, ver nota abajo), acá Vectora sí controla qué modelo se llama de verdad — es su propio server el que hace la llamada al proveedor, no código del cliente.
+
+Para el patrón C (sistema detrás de su propia API HTTP), existe `modeloActual(ctx)` (`probe.ts:62-64`), que es literalmente `return ctx.modelo` — el cliente lo lee para mandárselo a su propio backend, que a su vez debería llamar al gateway de Vectora en el punto donde antes llamaba a un proveedor.
+
+> **Nota sobre `wrap`:** el SDK todavía tiene un método `wrap(ctx, llamadaModelo)` que le pasa `ctx.modelo` a un callback arbitrario del cliente — es el mecanismo que usan los fixtures de demo internos de Vectora (que llaman al motor Mock, no a un proveedor real). Ya no es un camino documentado ni mostrado para conectar un sistema real: el único camino soportado es `completar()`. Ver § 5 para por qué esto es una decisión de producto, no algo que el SDK pueda forzar técnicamente.
 
 ## 3. Qué exige el SDK del sistema del cliente
 
 Lo mínimo indispensable:
 1. Llamar `probe.register(fn)` una vez, al arrancar el proceso. Esto además levanta el servidor HTTP (`probe.ts:41-46`) — si nunca se llama `register`, no hay servidor escuchando y `verificar-conexión` falla con conexión rechazada.
 2. `fn` debe devolver `Promise<{ respuesta, contextoRecuperado? }>` (`ProbeResultado`, ver contrato abajo). Si devuelve cualquier otra forma, `probe.ejecutar()` no valida el shape — lo reenvía tal cual, y Vectora intentará leer `.respuesta` de lo que sea que haya devuelto. Si `fn` no tiene `respuesta`, el reporte va a mostrar `undefined` serializado, sin error explícito en ese punto (el error aparecería después, al intentar juzgar/scorear un valor vacío).
-3. En algún punto adentro de `fn`, el código del cliente debe llamar `probe.wrap(ctx, callback)` (o leer `probe.modeloActual(ctx)`) y **usar de verdad** el string `modelo` para invocar al proveedor correcto.
+3. En algún punto adentro de `fn`, el código del cliente debe llamar `probe.completar(ctx, { prompt })` (o, en patrón C, leer `probe.modeloActual(ctx)` y pasárselo a su backend, que a su vez debería llamar al gateway).
 
 ### El supuesto frágil más importante
 
-**El SDK no puede detectar si el cliente ignora el parámetro `modelo`.** Si el `miClienteLLM.completar` del cliente tiene el modelo hardcodeado (ej. siempre llama a `gpt-4o` sin mirar el argumento), no pasa nada visible: la corrida completa igual, sin ningún error. Lo que va a pasar es que **los 5 modelos del panel van a devolver respuestas idénticas o casi idénticas** (mismo modelo real respondiendo a la misma pregunta), con latencia parecida entre sí. El reporte va a mostrar 5 filas con precisión/latencia muy similares y un "veredicto" sin sentido real (probablemente recomendando el más barato del catálogo, aunque el modelo que realmente respondió fue siempre el mismo).
+**El SDK no puede impedir que el cliente llame a un modelo por su cuenta, con su propia key, en vez de usar `completar()`.** `fn` es código del cliente corriendo en su propia infraestructura — Vectora nunca la ve. Si alguien escribe adentro de su función registrada una llamada directa a OpenAI con su propia key (en vez de `probe.completar()`), no hay forma de detectarlo ni bloquearlo desde el SDK. La política de Vectora es no mostrar ni documentar ese camino en ningún lado (ver § 5) — pero es una política de producto, no una garantía técnica.
 
-Vectora hoy **no detecta este caso automáticamente**. No hay ningún chequeo tipo "¿las respuestas de modelos distintos son sospechosamente idénticas?". Es la limitación más importante para probar con un sistema real esta semana: si conectas un sistema y el reporte te muestra a todos los modelos con precisión y latencia casi idénticas, sospecha primero de esto antes de sospechar del juez.
+Un síntoma relacionado, si algo así ocurre (o si `completar()` se llama pero el modelo termina ignorado en el prompt/lógica del cliente): **los modelos del panel devuelven respuestas idénticas o casi idénticas**, con latencia parecida entre sí. El reporte va a mostrar filas con precisión/latencia muy similares y un "veredicto" sin sentido real. Vectora hoy **no detecta este caso automáticamente** — no hay ningún chequeo tipo "¿las respuestas de modelos distintos son sospechosamente idénticas?". Si conectas un sistema y el reporte te muestra a todos los modelos con precisión y latencia casi idénticas, sospecha primero de esto antes de sospechar del juez.
 
 ### Otros supuestos
 
@@ -169,23 +171,13 @@ export type LlamadaModelo<T = unknown> = (modelo: string) => Promise<T>;
 
 ## 5. El gateway de Vectora: quién hace la llamada al modelo
 
-Hasta acá, todo asume que el `llamadaModelo` que recibe `wrap` es del cliente — su propio `miClienteLLM`, con su propia API key. Esa sigue siendo una opción válida. Pero hay una segunda, agregada después: que **Vectora** haga la llamada real, absorba el costo, y se lo cobre al cliente vía créditos (pago por uso, con margen). Las dos conviven, elige el cliente cuál usar en cada sistema que conecta.
-
-### Opción A — tu propia key (como antes)
-
-```typescript
-const respuesta = await probe.wrap(ctx, (modelo) =>
-  miClienteLLM.completar({ modelo, prompt })   // tu key, tu proveedor, tu costo
-);
-```
-
-### Opción B — el gateway de Vectora
+**Vectora hace la llamada real, absorbe el costo, y se lo cobra al cliente vía créditos** (pago por uso, con margen). Es el único camino documentado y soportado — así los costos quedan gobernados y visibles del lado de Vectora, no dispersos en las cuentas de cada cliente. (El SDK todavía tiene `wrap`, que le pasaría el modelo a un callback del cliente con su propia key — pero eso ya no se muestra en ningún snippet, ejemplo, ni doc; queda solo para uso interno de Vectora, ver nota en § 2.)
 
 ```typescript
 const { texto } = await probe.completar(ctx, { prompt });  // la key de Vectora, te cobra créditos
 ```
 
-`probe.completar()` es un método nuevo del SDK (`probe/src/probe.ts`), complementario a `wrap` — no lo reemplaza. Requiere un `apiKey` de Vectora (`crearProbe({ apiKey })` o env var `VECTORA_API_KEY`), que identifica a la organización que paga. Por dentro:
+`probe.completar()` es el método del SDK (`probe/src/probe.ts`) para esto. Requiere un `apiKey` de Vectora (`crearProbe({ apiKey })` o env var `VECTORA_API_KEY`), que identifica a la organización que paga — la sacás desde la UI (Gobernanza → Créditos). Por dentro:
 
 1. `probe.completar` hace `POST {gatewayUrl}/api/gateway/completar` con `Authorization: Bearer <apiKey>` y `{modelo, prompt}` (`gatewayUrl` default `http://localhost:4310`, o env var `VECTORA_GATEWAY_URL` — en un deploy real, la URL pública del server de Vectora).
 2. El server (`routes/gateway.ts`) busca la organización dueña de ese `apiKey`, chequea que tenga saldo positivo, y si alcanza, llama de verdad a OpenAI (`engine/providerGateway.ts::completarConGateway` — **solo modelos de OpenAI por ahora**, confirmado con el negocio; otros proveedores quedan para cuando haya keys).
@@ -194,7 +186,7 @@ const { texto } = await probe.completar(ctx, { prompt });  // la key de Vectora,
 
 Además de `iniciarCorrida()` (Vectora corre casos contra el probe del cliente) hay un segundo gate, **antes** de eso: al confirmar "correr" en el stepper, Vectora estima el costo de la corrida completa (la misma heurística de `costEstimator.ts` que ya mostraba el costo estimado) + margen, y si el saldo de la organización no alcanza para esa estimación, bloquea la corrida entera antes de gastar nada (`orchestrator.ts::iniciarCorrida`, y lo mismo en `governance.ts::simularEventoNuevoModelo` para las alertas por evento). Es un gate grueso (estimación, no el costo exacto) — el gate fino y exacto es el del punto 4, que solo cobra por lo que de verdad pasa por el gateway.
 
-**Importante:** Vectora no tiene forma de saber, al recibir un `POST /probe/ejecutar` del cliente, si la función registrada usó `wrap` (su key) o `completar` (el gateway) — eso lo decide el código del cliente, adentro de su propio proceso. El pre-check de saldo en `iniciarCorrida()` bloquea la corrida completa igual, asumiendo que se va a usar el gateway; si el cliente en realidad usa su propia key para todo, ese pre-check es más conservador de lo necesario (no se cobra nada, pero tampoco corre si el saldo está en cero). Ver Limitaciones conocidas.
+**Importante:** Vectora no tiene forma de saber, al recibir un `POST /probe/ejecutar` del cliente, qué hizo la función registrada por dentro — si de verdad llamó a `probe.completar()` (el gateway) o si, pese a que ya no se documenta ni se muestra en ningún lado, alguien escribió su propia llamada a un proveedor con su propia key. El pre-check de saldo en `iniciarCorrida()` bloquea la corrida completa asumiendo el camino documentado (el gateway); si en la práctica el cliente usa su propia key para todo, ese pre-check es más conservador de lo necesario (no se cobra nada, pero tampoco corre si el saldo está en cero). Ver Limitaciones conocidas.
 
 ## 6. Autenticación y comunicación
 
@@ -224,7 +216,7 @@ Hay dos niveles distintos, y se comportan distinto:
 
 En orden de qué tan probable es que te muerda esta semana:
 
-1. **No hay forma de detectar si el cliente ignora el parámetro `modelo`.** Ver sección 3. Si el reporte muestra a todos los modelos con métricas casi idénticas, sospecha de esto primero.
+1. **No hay forma de detectar si el cliente ignora el parámetro `modelo`, ni de impedir que llame a un proveedor con su propia key en vez de usar `completar()`.** Ver sección 3. "Solo se puede usar el gateway de Vectora" es una política de producto (nada lo muestra ni lo documenta), no una garantía técnica — el SDK no puede inspeccionar el código de la función registrada. Si el reporte muestra a todos los modelos con métricas casi idénticas, sospecha de esto primero.
 2. **Sin autenticación ni HTTPS entre Vectora y el probe del cliente** (dirección Vectora→cliente). Solo apto para correr en `localhost` o detrás de un túnel de confianza. Ver sección 6. El gateway (dirección cliente→Vectora) sí está autenticado.
 3. **El gateway solo soporta modelos de OpenAI.** `claude-3-5-sonnet`, `gemini-1-5-flash`, `llama-3-1-70b` no tienen key configurada — `probe.completar()` con esos ids tira un error claro (`modeloSoportadoPorGateway` en `providerGateway.ts`), no cae a un mock silencioso.
 4. **El pre-check de saldo en `iniciarCorrida()` es una estimación, no el costo exacto**, y bloquea la corrida completa asumiendo que se va a usar el gateway — aunque el cliente termine usando su propia key (en cuyo caso no se le cobra nada, pero el pre-check igual pudo haber bloqueado si el saldo estaba en cero). Ver sección 5.

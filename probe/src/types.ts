@@ -1,11 +1,16 @@
 /**
  * Contrato público del SDK @vectora/probe.
  *
- * El cliente instala este paquete dentro de su propio proceso y declara dos
- * ganchos: `register` (su función de entrada, con todo el pipeline adentro)
- * y `wrap` (el punto exacto donde se invoca al modelo). Vectora nunca ve el
- * código del cliente: solo llama a estos ganchos por HTTP, una vez por caso
- * de prueba y por modelo del panel.
+ * El cliente instala este paquete dentro de su propio proceso y declara
+ * `register` (su función de entrada, con todo el pipeline adentro). En el
+ * punto donde su sistema necesita el modelo, usa `completar()` — llama al
+ * gateway de modelos de Vectora (Vectora paga al proveedor real y cobra
+ * créditos con margen). Vectora nunca ve el código del cliente: solo llama a
+ * `register` por HTTP, una vez por caso de prueba y por modelo del panel.
+ *
+ * `wrap` sigue existiendo en el SDK pero ya no es el camino recomendado ni
+ * documentado para sistemas reales — queda para uso interno de Vectora (los
+ * fixtures de demo, que llaman al motor Mock). Ver docs/COMO-FUNCIONA-LA-CONEXION.md § 5.
  */
 
 /** Contexto que Vectora inyecta en cada invocación de una corrida. */
@@ -34,7 +39,7 @@ export type FuncionRegistrada<TInput = unknown> = (
   ctx: VectoraCtx
 ) => Promise<ProbeResultado>;
 
-/** Llamada al modelo que el cliente envuelve con `probe.wrap(ctx, llmCall)`. */
+/** Llamada al modelo que el cliente envuelve con `probe.wrap(ctx, llmCall)` — uso interno de Vectora, ver nota arriba. */
 export type LlamadaModelo<T = unknown> = (modelo: string) => Promise<T>;
 
 export interface ProbeOptions {
@@ -58,6 +63,8 @@ export interface ProbeOptions {
 /** Parámetros para `probe.completar()` — el gateway de modelos de Vectora. */
 export interface CompletarParams {
   prompt: string;
+  /** "json" fuerza al modelo a devolver un JSON válido (para extracción/clasificación, Patrón B). */
+  formato?: "json";
 }
 
 /** Resultado de `probe.completar()`. */

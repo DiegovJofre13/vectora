@@ -17,11 +17,12 @@ const GATEWAY_URL_DEFAULT = "http://localhost:4310";
 
 /**
  * VectoraProbe es el objeto central del SDK. Un cliente lo instancia una vez
- * (o usa el singleton `probe` exportado por el paquete), declara `register`
- * y envuelve su llamada al modelo con `wrap`. A partir de ahí, Vectora puede
- * invocar su sistema de forma remota vía el servidor HTTP local que este
- * objeto levanta, intercambiando el modelo en cada corrida sin tocar el
- * retrieval ni el prompt del cliente.
+ * (o usa el singleton `probe` exportado por el paquete), declara `register`,
+ * y en el punto donde su sistema necesita el modelo llama a `completar()` —
+ * el gateway de modelos de Vectora. A partir de ahí, Vectora puede invocar
+ * su sistema de forma remota vía el servidor HTTP local que este objeto
+ * levanta, intercambiando el modelo en cada corrida sin tocar el retrieval
+ * ni el prompt del cliente.
  */
 export class VectoraProbe {
   private fn: FuncionRegistrada | undefined;
@@ -53,10 +54,13 @@ export class VectoraProbe {
   }
 
   /**
-   * Envuelve la llamada al modelo. Vectora ya decidió qué modelo toca en
-   * `ctx.modelo`; este método solo lo pasa al callback del cliente y mide
-   * latencia. El retrieval y el prompt quedan intactos: lo único que cambia
-   * entre corridas es el modelo que recibe `llamadaModelo`.
+   * Envuelve la llamada al modelo, pasándole al callback del cliente el
+   * modelo que Vectora decidió para esta invocación y midiendo latencia.
+   *
+   * No es el camino recomendado para sistemas reales — usa `completar()` en
+   * su lugar, que llama al gateway de Vectora en vez de que el callback
+   * llame a un proveedor con una API key propia. `wrap` sigue acá para uso
+   * interno de Vectora (los fixtures de demo, que llaman al motor Mock).
    */
   async wrap<T>(ctx: VectoraCtx, llamadaModelo: LlamadaModelo<T>): Promise<T> {
     const inicio = Date.now();
@@ -71,19 +75,18 @@ export class VectoraProbe {
   }
 
   /**
-   * Alternativa a `wrap` + tu propio cliente de modelos: le pide a Vectora que
-   * haga la llamada real al modelo por vos (con el `apiKey` de tu organización)
-   * y te devuelve el texto. Vectora paga al proveedor y te descuenta créditos
-   * (costo real + margen) — no necesitás tu propia API key del proveedor.
+   * El punto donde tu sistema llama al modelo: le pide a Vectora que haga la
+   * llamada real (con el `apiKey` de tu organización) y te devuelve el texto.
+   * Vectora paga al proveedor y te descuenta créditos (costo real + margen)
+   * — no necesitás ninguna API key de proveedor de modelos en tu sistema.
    * Requiere haber pasado `apiKey` (o la env var VECTORA_API_KEY) al crear el
-   * probe. Mide latencia igual que `wrap`, así que no hace falta envolver esto
-   * con `wrap` también.
+   * probe. Mide latencia internamente, no hace falta envolver esto con `wrap`.
    */
   async completar(ctx: VectoraCtx, params: CompletarParams): Promise<CompletarResultado> {
     if (!this.apiKey) {
       throw new Error(
-        "probe.completar() requiere un apiKey de Vectora (pásalo en crearProbe({ apiKey }) o en la env var VECTORA_API_KEY). " +
-          "Si preferís usar tu propia API key de modelo, usá probe.wrap() en vez de completar()."
+        "probe.completar() requiere un apiKey de Vectora — pásalo en crearProbe({ apiKey }) o en la env var VECTORA_API_KEY. " +
+          "Sacá tu apiKey desde la pestaña Gobernanza → Créditos en la UI de Vectora."
       );
     }
 
@@ -91,7 +94,13 @@ export class VectoraProbe {
     const res = await fetch(`${this.gatewayUrl.replace(/\/$/, "")}/api/gateway/completar`, {
       method: "POST",
       headers: { "content-type": "application/json", authorization: `Bearer ${this.apiKey}` },
-      body: JSON.stringify({ modelo: ctx.modelo, prompt: params.prompt, casoUsoId: ctx.casoUsoId, casoPruebaId: ctx.casoPruebaId }),
+      body: JSON.stringify({
+        modelo: ctx.modelo,
+        prompt: params.prompt,
+        formato: params.formato,
+        casoUsoId: ctx.casoUsoId,
+        casoPruebaId: ctx.casoPruebaId,
+      }),
     });
     const data = (await res.json()) as { ok: boolean; error?: string; texto?: string };
     ctx._metrica = { latenciaMs: Date.now() - inicio, modelo: ctx.modelo };

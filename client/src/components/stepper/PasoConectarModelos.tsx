@@ -126,7 +126,8 @@ export function PasoConectarModelos({ casoId, tipoTarea, requiereGenerador, nomb
         <h2 className="font-display text-xl font-medium">1. Instala el SDK y declara tus ganchos</h2>
         <p className="mt-1 text-sm text-tinta/60">
           <code className="rounded bg-marca-tinte px-1.5 py-0.5 font-mono text-xs text-marca">npm install @vectora/probe</code> en el proyecto de tu
-          sistema, y declara <code className="font-mono text-xs">register</code> + <code className="font-mono text-xs">wrap</code> según tu patrón:
+          sistema, y declara <code className="font-mono text-xs">register</code> + <code className="font-mono text-xs">completar</code> según tu
+          patrón — el gateway de Vectora hace la llamada real al modelo, no necesitas tu propia API key de proveedor:
         </p>
         <div className="mt-3">
           <SnippetProbe tipoSugerido={requiereGenerador ? "rag" : "estructural"} />

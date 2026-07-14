@@ -7,6 +7,7 @@ import { aplicarMargen } from "../engine/billing.js";
 const completarSchema = z.object({
   modelo: z.string().min(1),
   prompt: z.string().min(1),
+  formato: z.literal("json").optional(),
   casoUsoId: z.string().optional(),
   casoPruebaId: z.string().optional(),
 });
@@ -41,7 +42,7 @@ export async function registrarRutasGateway(app: FastifyInstance): Promise<void>
     }
 
     try {
-      const resultado = await completarConGateway(parsed.data.modelo, parsed.data.prompt);
+      const resultado = await completarConGateway(parsed.data.modelo, parsed.data.prompt, parsed.data.formato);
       const { margenUsd, totalUsd } = aplicarMargen(resultado.costoBaseUsd);
 
       await registrarConsumo({
