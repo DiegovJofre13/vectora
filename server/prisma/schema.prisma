@@ -1,16 +1,16 @@
 // Vectora — schema de datos.
 //
-// Nota de diseño: se evita `enum` de Prisma a propósito. El conector sqlite no
-// soporta enums nativos, y este proyecto está pensado para migrar a Postgres
-// más adelante (ver DECISIONS.md) sin fricción — los campos "tipo" quedan como
-// String validados en la capa de aplicación (zod), portable entre ambos.
+// Nota de diseño: se evita `enum` de Prisma a propósito. Los campos "tipo"
+// quedan como String validados en la capa de aplicación (zod) — portable
+// entre sqlite y Postgres, que es justamente el motivo por el que la
+// migración a Postgres (ver DECISIONS.md, Fase 10) no tocó ningún otro campo.
 
 generator client {
   provider = "prisma-client-js"
 }
 
 datasource db {
-  provider = "sqlite"
+  provider = "postgresql"
   url      = env("DATABASE_URL")
 }
 
