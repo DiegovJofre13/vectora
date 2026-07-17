@@ -218,27 +218,25 @@ async function sembrarCorreccionesJuicio(casoDeUsoId: string, dominio: string, c
     const docs = docsDeContexto(preg);
     const esCorregida = rng() < 0.15;
     const confidence = Number((0.3 + rng() * 0.35).toFixed(3)); // población histórica de baja confianza ya calibrada
-    filas.push(
-      db.correccionJuicio.create({
-        data: {
-          casoDeUsoId,
-          dominio,
-          question: preg.pregunta,
-          context: docs.map((d) => d.contenido).join(" "),
-          systemAnswer: esCorregida
-            ? "No cuento con información suficiente en el contexto para responder con precisión."
-            : preg.respuestaEsperadaProvisional,
-          provisionalExpected: preg.respuestaEsperadaProvisional,
-          judgeVerdict: JSON.stringify({ veredicto: esCorregida ? "insuficiente" : "correcta", groundedness: esCorregida ? 0.4 : 0.9 }),
-          humanVerdict: esCorregida ? "corregida" : "correcta",
-          correctedAnswer: esCorregida ? preg.respuestaEsperadaProvisional : null,
-          confidence,
-          timestamp: diasAtras(Math.floor(rng() * 90) + 1),
-        },
-      })
-    );
+    filas.push({
+      casoDeUsoId,
+      dominio,
+      question: preg.pregunta,
+      context: docs.map((d) => d.contenido).join(" "),
+      systemAnswer: esCorregida
+        ? "No cuento con información suficiente en el contexto para responder con precisión."
+        : preg.respuestaEsperadaProvisional,
+      provisionalExpected: preg.respuestaEsperadaProvisional,
+      judgeVerdict: JSON.stringify({ veredicto: esCorregida ? "insuficiente" : "correcta", groundedness: esCorregida ? 0.4 : 0.9 }),
+      humanVerdict: esCorregida ? "corregida" : "correcta",
+      correctedAnswer: esCorregida ? preg.respuestaEsperadaProvisional : null,
+      confidence,
+      timestamp: diasAtras(Math.floor(rng() * 90) + 1),
+    });
   }
-  await Promise.all(filas);
+  // Un solo INSERT masivo, no 200 conexiones en paralelo — Promise.all acá se comía el límite
+  // de conexiones del connection pooler de Supabase (free tier: 15 en modo sesión).
+  await db.correccionJuicio.createMany({ data: filas });
 }
 
 async function main() {
