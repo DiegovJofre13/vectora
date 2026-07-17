@@ -44,12 +44,19 @@ interface CasoDeUsoParaCorrida {
 }
 
 /**
- * Crea la corrida + sus casos de prueba (síncrono, sin llamadas al sistema
- * del cliente todavía) y dispara la ejecución real en segundo plano.
- * Retorna de inmediato con la corrida en estado "corriendo" para que la UI
- * empiece a hacer polling de progreso.
+ * Genera el dataset (preguntas sintéticas o documentos existentes) y crea la
+ * corrida + sus `CasoPrueba` — síncrono, sin llamadas al sistema del cliente
+ * ni al gateway de modelos todavía. Queda en estado "pendiente" (el default
+ * del schema) para que el usuario pueda revisar y editar las preguntas y la
+ * respuesta esperada provisional antes de gastar nada — ver `confirmarYCorrer()`.
+ *
+ * Con el generador heurístico actual (plantillas, `generatorAgent.ts`) esto
+ * no cuesta crédito. El día que el generador pase a ser un LLM real, el
+ * pre-flight de créditos de esta función tendría que agregarse acá también
+ * (hoy vive en `confirmarYCorrer`, porque lo único que cuesta plata real es
+ * la corrida contra el panel de modelos).
  */
-export async function iniciarCorrida(
+export async function generarDataset(
   casoDeUso: CasoDeUsoParaCorrida,
   modelos: string[],
   insumos: InsumosCorrida
@@ -87,41 +94,97 @@ export async function iniciarCorrida(
     );
   }
 
-  // Pre-flight de créditos: estimación conservadora (misma heurística que el paso de costo
-  // estimado del stepper) + margen, antes de gastar nada. Es un gate grueso — el gate preciso,
-  // que solo cobra por lo que de verdad pasa por el gateway, vive en routes/gateway.ts.
+  const corrida = await db.evaluacionCorrida.create({
+    data: {
+      casoDeUsoId: casoDeUso.id,
+      modelosEvaluados: JSON.stringify(modelos),
+      // Default "pendiente" del schema: dataset generado, esperando revisión humana.
+      numCasos: casosData.length,
+      casosPrueba: { create: casosData },
+    },
+  });
+
+  return { corridaId: corrida.id };
+}
+
+/**
+ * Segunda fase: el usuario ya revisó (y opcionalmente editó) el dataset
+ * generado por `generarDataset()`. Acá sí se hace el pre-flight de créditos
+ * (estimación conservadora + margen, el gate preciso vive en routes/gateway.ts)
+ * y recién acá se dispara la ejecución real contra el sistema del cliente.
+ */
+export async function confirmarYCorrer(corridaId: string): Promise<void> {
+  const corrida = await db.evaluacionCorrida.findUniqueOrThrow({
+    where: { id: corridaId },
+    include: { casoDeUso: true },
+  });
+
+  if (corrida.estado !== "pendiente") {
+    throw new Error(`Esta corrida ya está en estado "${corrida.estado}" — no se puede confirmar dos veces.`);
+  }
+  if (!corrida.casoDeUso.probeUrl) {
+    throw new Error("El caso de uso no tiene un probeUrl conectado.");
+  }
+
+  const modelos = JSON.parse(corrida.modelosEvaluados) as string[];
+  const requiereGenerador = estrategiaScoringParaTipo(corrida.casoDeUso.tipoTarea as TipoTarea) === "juez";
+
   const estimacion = estimarCostoCorrida({
     modelos,
-    numCasos: casosData.length,
+    numCasos: corrida.numCasos,
     tipoEstimacion: requiereGenerador ? "rag" : "estructural",
   });
   const { totalUsd: costoConMargen } = aplicarMargen(estimacion.costoTotalUsd);
-  const saldoAlcanza = await verificarSaldoSuficiente(casoDeUso.organizacionId, costoConMargen);
+  const saldoAlcanza = await verificarSaldoSuficiente(corrida.casoDeUso.organizacionId, costoConMargen);
   if (!saldoAlcanza) {
     throw new Error(
       `Créditos insuficientes: esta corrida costaría aprox. US$${costoConMargen.toFixed(2)} (con margen incluido). Carga créditos antes de correr.`
     );
   }
 
-  const corrida = await db.evaluacionCorrida.create({
-    data: {
-      casoDeUsoId: casoDeUso.id,
-      modelosEvaluados: JSON.stringify(modelos),
-      estado: "corriendo",
-      numCasos: casosData.length,
-      casosPrueba: { create: casosData },
-    },
-  });
+  await db.evaluacionCorrida.update({ where: { id: corridaId }, data: { estado: "corriendo" } });
+  await db.casoDeUso.update({ where: { id: corrida.casoDeUso.id }, data: { estado: "conectado" } });
 
-  await db.casoDeUso.update({ where: { id: casoDeUso.id }, data: { estado: "conectado" } });
+  const probeUrl = corrida.casoDeUso.probeUrl;
 
   // Fire-and-forget: la UI hace polling de progreso vía GET .../progreso.
-  void ejecutarCorridaParaGobernanza(corrida.id, casoDeUso.probeUrl, modelos).catch(async (err) => {
-    console.error(`[orchestrator] corrida ${corrida.id} falló:`, err);
-    await db.evaluacionCorrida.update({ where: { id: corrida.id }, data: { estado: "error" } });
+  void ejecutarCorridaParaGobernanza(corridaId, probeUrl, modelos).catch(async (err) => {
+    console.error(`[orchestrator] corrida ${corridaId} falló:`, err);
+    await db.evaluacionCorrida.update({ where: { id: corridaId }, data: { estado: "error" } });
   });
+}
 
-  return { corridaId: corrida.id };
+/**
+ * Edita la pregunta generada y/o la respuesta esperada provisional de un caso
+ * de prueba, mientras la corrida sigue "pendiente" (antes de correr). Solo
+ * aplica a casos sintéticos (RAG/conversacional, `esSintetico: true`) — para
+ * extracción/clasificación el `input` es el documento real del cliente
+ * envuelto junto a su ground truth, no una pregunta generada, y no es lo que
+ * este flujo de revisión edita.
+ */
+export async function editarCasoPrueba(
+  corridaId: string,
+  casoPruebaId: string,
+  cambios: { pregunta?: string; respuestaEsperadaProvisional?: string }
+): Promise<void> {
+  const corrida = await db.evaluacionCorrida.findUniqueOrThrow({ where: { id: corridaId } });
+  if (corrida.estado !== "pendiente") {
+    throw new Error(`No se puede editar: la corrida ya está en estado "${corrida.estado}".`);
+  }
+
+  const caso = await db.casoPrueba.findUniqueOrThrow({ where: { id: casoPruebaId } });
+  if (caso.evaluacionCorridaId !== corridaId) {
+    throw new Error("Ese caso de prueba no pertenece a esta corrida.");
+  }
+  if (!caso.esSintetico) {
+    throw new Error("Este caso no es una pregunta generada — no se puede editar desde acá.");
+  }
+
+  const data: { input?: string; respuestaEsperadaProvisional?: string } = {};
+  if (cambios.pregunta !== undefined) data.input = JSON.stringify(cambios.pregunta);
+  if (cambios.respuestaEsperadaProvisional !== undefined) data.respuestaEsperadaProvisional = cambios.respuestaEsperadaProvisional;
+
+  await db.casoPrueba.update({ where: { id: casoPruebaId }, data });
 }
 
 async function llamarProbe(

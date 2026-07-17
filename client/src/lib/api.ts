@@ -184,11 +184,30 @@ export interface DocumentoExistenteInput {
   camposAmbiguos?: string[];
 }
 
-export async function iniciarCorrida(
+/** Fase 1: genera el dataset (preguntas + respuesta provisional, o los documentos existentes) sin correr nada todavía. */
+export async function generarDataset(
   casoId: string,
   params: { modelos: string[]; kbDocs?: KbDocInput[]; documentosExistentes?: DocumentoExistenteInput[] }
 ): Promise<{ corridaId: string }> {
   return req(`/api/casos-de-uso/${casoId}/evaluaciones`, { method: "POST", body: JSON.stringify(params) });
+}
+
+/** Fase 2: confirma el dataset (ya revisado/editado) y recién acá dispara la corrida real contra el sistema del cliente. */
+export async function confirmarYCorrer(casoId: string, corridaId: string): Promise<{ ok: boolean; error?: string }> {
+  return req(`/api/casos-de-uso/${casoId}/evaluaciones/${corridaId}/confirmar`, { method: "POST", body: "{}" });
+}
+
+/** Edita la pregunta generada y/o la respuesta esperada provisional de un caso, mientras la corrida sigue "pendiente". */
+export async function editarCasoPrueba(
+  casoId: string,
+  corridaId: string,
+  casoPruebaId: string,
+  cambios: { pregunta?: string; respuestaEsperadaProvisional?: string }
+): Promise<{ ok: boolean; error?: string }> {
+  return req(`/api/casos-de-uso/${casoId}/evaluaciones/${corridaId}/casos-prueba/${casoPruebaId}`, {
+    method: "PATCH",
+    body: JSON.stringify(cambios),
+  });
 }
 
 export async function obtenerProgreso(casoId: string, corridaId: string): Promise<ProgresoCorrida> {
