@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "tsx watch src/index.ts",
+    "postinstall": "prisma generate --schema prisma/schema.prisma",
     "build": "tsc -p tsconfig.json",
     "start": "node dist/index.js",
     "demo:bot": "tsx watch src/demo/fintechAndinaBot.ts",
@@ -17,13 +18,11 @@
     "@vectora/probe": "*",
     "@fastify/cors": "^10.0.1",
     "@prisma/client": "^5.22.0",
-    "fastify": "^5.1.0",
-    "zod": "^3.23.8"
-  },
-  "devDependencies": {
     "@types/node": "^22.9.0",
+    "fastify": "^5.1.0",
     "prisma": "^5.22.0",
     "tsx": "^4.19.2",
-    "typescript": "^5.6.3"
+    "typescript": "^5.6.3",
+    "zod": "^3.23.8"
   }
 }

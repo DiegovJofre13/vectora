@@ -3,7 +3,7 @@ services:
     name: vectora-server
     runtime: node
     plan: free
-    buildCommand: npm install && npm run build -w @vectora/probe && npm run build -w @vectora/server
+    buildCommand: npm install && npx prisma generate --schema server/prisma/schema.prisma && npm run build -w @vectora/probe && npm run build -w @vectora/server
     startCommand: npm run start -w @vectora/server
     envVars:
       - key: DATABASE_URL
