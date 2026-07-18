@@ -4,9 +4,9 @@ import { generarPreguntas, type DocumentoKbInput } from "./generatorAgent.js";
 import { juzgar } from "./judge.js";
 import { scoreEstructuralConDetalle } from "./structuralScoring.js";
 import { estimarCostoUsd } from "./mockModelEngine.js";
-import { estimarCostoCorrida } from "./costEstimator.js";
+import { estimarCostoCorrida, estimarCostoGeneracionDataset } from "./costEstimator.js";
 import { aplicarMargen } from "./billing.js";
-import { verificarSaldoSuficiente } from "./credits.js";
+import { registrarConsumo, verificarSaldoSuficiente } from "./credits.js";
 import { estrategiaScoringParaTipo, type TipoTarea } from "./taskTypes.js";
 
 const CONCURRENCIA_MAXIMA = 4;
@@ -44,17 +44,22 @@ interface CasoDeUsoParaCorrida {
 }
 
 /**
- * Genera el dataset (preguntas sintéticas o documentos existentes) y crea la
- * corrida + sus `CasoPrueba` — síncrono, sin llamadas al sistema del cliente
- * ni al gateway de modelos todavía. Queda en estado "pendiente" (el default
- * del schema) para que el usuario pueda revisar y editar las preguntas y la
- * respuesta esperada provisional antes de gastar nada — ver `confirmarYCorrer()`.
+ * Genera el dataset (preguntas sintéticas vía LLM, o documentos existentes)
+ * y crea la corrida + sus `CasoPrueba`. Queda en estado "pendiente" (el
+ * default del schema) para que el usuario pueda revisar y editar las
+ * preguntas y la respuesta esperada provisional antes de gastar la corrida
+ * contra el panel de modelos — ver `confirmarYCorrer()`.
  *
- * Con el generador heurístico actual (plantillas, `generatorAgent.ts`) esto
- * no cuesta crédito. El día que el generador pase a ser un LLM real, el
- * pre-flight de créditos de esta función tendría que agregarse acá también
- * (hoy vive en `confirmarYCorrer`, porque lo único que cuesta plata real es
- * la corrida contra el panel de modelos).
+ * El generador de preguntas (`generatorAgent.ts`) llama a un LLM real —
+ * mismo gateway y mismo margen del 30% que cualquier otra llamada a modelo
+ * en Vectora. Por eso esta función SÍ hace su propio pre-flight de créditos
+ * (para el costo de generar, antes de llamar) y su propio registro de
+ * consumo real (después, con el costo exacto que devolvió el gateway) —
+ * separado del pre-flight de `confirmarYCorrer()`, que es para la corrida
+ * de evaluación en sí. Los dos movimientos quedan ligados a la misma
+ * `evaluacionCorridaId`, así el costo total de una corrida es la suma de
+ * ambos (ver `credits.ts::registrarConsumo` y el recálculo de `costoRealUsd`
+ * al final de `ejecutarCorridaParaGobernanza`).
  */
 export async function generarDataset(
   casoDeUso: CasoDeUsoParaCorrida,
@@ -70,21 +75,44 @@ export async function generarDataset(
 
   const requiereGenerador = estrategiaScoringParaTipo(casoDeUso.tipoTarea as TipoTarea) === "juez";
 
-  const casosData = requiereGenerador
-    ? generarPreguntas(insumos.kbDocs ?? [], 30).map((p) => ({
-        input: JSON.stringify(p.pregunta),
-        dificultad: p.dificultad,
-        respuestaEsperadaProvisional: p.respuestaEsperadaProvisional,
-        esSintetico: true,
-        contextoFuente: JSON.stringify(p.documentosFuente),
-      }))
-    : (insumos.documentosExistentes ?? []).map((d) => ({
-        input: JSON.stringify({ documento: d.input, esperado: d.esperado, camposAmbiguos: d.camposAmbiguos } satisfies EnvolturaEstructural),
-        dificultad: null,
-        respuestaEsperadaProvisional: null,
-        esSintetico: false,
-        contextoFuente: null,
-      }));
+  let casosData: {
+    input: string;
+    dificultad: string | null;
+    respuestaEsperadaProvisional: string | null;
+    esSintetico: boolean;
+    contextoFuente: string | null;
+  }[];
+  let costoGeneracion: { costoBaseUsd: number; tokensEntrada: number; tokensSalida: number } | null = null;
+
+  if (requiereGenerador) {
+    const kbDocs = insumos.kbDocs ?? [];
+    const estimacionGeneracion = estimarCostoGeneracionDataset(kbDocs, 30);
+    const { totalUsd: costoGeneracionConMargen } = aplicarMargen(estimacionGeneracion);
+    const saldoAlcanzaGeneracion = await verificarSaldoSuficiente(casoDeUso.organizacionId, costoGeneracionConMargen);
+    if (!saldoAlcanzaGeneracion) {
+      throw new Error(
+        `Créditos insuficientes para generar el dataset: costaría aprox. US$${costoGeneracionConMargen.toFixed(2)} (con margen incluido). Carga créditos antes de continuar.`
+      );
+    }
+
+    const generado = await generarPreguntas(kbDocs, 30);
+    casosData = generado.preguntas.map((p) => ({
+      input: JSON.stringify(p.pregunta),
+      dificultad: p.dificultad,
+      respuestaEsperadaProvisional: p.respuestaEsperadaProvisional,
+      esSintetico: true,
+      contextoFuente: JSON.stringify(p.documentosFuente),
+    }));
+    costoGeneracion = { costoBaseUsd: generado.costoBaseUsd, tokensEntrada: generado.tokensEntrada, tokensSalida: generado.tokensSalida };
+  } else {
+    casosData = (insumos.documentosExistentes ?? []).map((d) => ({
+      input: JSON.stringify({ documento: d.input, esperado: d.esperado, camposAmbiguos: d.camposAmbiguos } satisfies EnvolturaEstructural),
+      dificultad: null,
+      respuestaEsperadaProvisional: null,
+      esSintetico: false,
+      contextoFuente: null,
+    }));
+  }
 
   if (casosData.length === 0) {
     throw new Error(
@@ -103,6 +131,17 @@ export async function generarDataset(
       casosPrueba: { create: casosData },
     },
   });
+
+  if (costoGeneracion) {
+    const { margenUsd } = aplicarMargen(costoGeneracion.costoBaseUsd);
+    await registrarConsumo({
+      organizacionId: casoDeUso.organizacionId,
+      evaluacionCorridaId: corrida.id,
+      costoBaseUsd: costoGeneracion.costoBaseUsd,
+      margenUsd,
+      descripcion: `Generación del dataset (gpt-4o-mini, 30 preguntas, ${costoGeneracion.tokensEntrada}+${costoGeneracion.tokensSalida} tokens)`,
+    });
+  }
 
   return { corridaId: corrida.id };
 }
@@ -313,20 +352,21 @@ export async function ejecutarCorridaParaGobernanza(corridaId: string, probeUrl:
 
   await Promise.all(tareas);
 
-  const resultados = await db.resultadoModelo.findMany({ where: { casoPrueba: { evaluacionCorridaId: corridaId } } });
-  const costoRealUsd = Number(resultados.reduce((acc, r) => acc + r.costoEstimadoUsd, 0).toFixed(4));
+  // costoRealUsd = el total REAL cobrado por esta corrida — generación del dataset
+  // (orchestrator.ts::generarDataset) + cada llamada de evaluación que pasó por el gateway
+  // (routes/gateway.ts, ligada acá vía evaluacionCorridaId) — leído directo del ledger real
+  // (MovimientoCreditos), no una heurística. Para corridas BYO-key (que no le cuestan nada a
+  // Vectora) esto da 0 correctamente, ya que esas llamadas nunca pasan por el gateway.
+  const movimientos = await db.movimientoCreditos.aggregate({
+    where: { evaluacionCorridaId: corridaId, tipo: "consumo" },
+    _sum: { montoUsd: true },
+  });
+  const costoRealUsd = Number((movimientos._sum.montoUsd ?? 0).toFixed(4));
 
   await db.evaluacionCorrida.update({
     where: { id: corridaId },
     data: { estado: "completado", completedAt: new Date(), costoRealUsd },
   });
-
-  // Nota: ya NO se registra acá un MovimientoCreditos de "1 crédito por corrida" — con el
-  // gateway de modelos, el cobro real ocurre por llamada, en tiempo real, dentro de
-  // routes/gateway.ts::registrarConsumo() (solo cuando el cliente de verdad usa el gateway).
-  // Loguear otro más acá duplicaría el cobro y además cobraría de más a quien use su propia
-  // API key (BYO), que no le cuesta nada a Vectora. `costoRealUsd` en EvaluacionCorrida queda
-  // como referencia informativa para el reporte, no como un cargo.
 
   await db.casoDeUso.update({ where: { id: corrida.casoDeUsoId }, data: { estado: "evaluado" } });
 }

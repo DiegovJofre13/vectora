@@ -101,7 +101,7 @@ export function PasoCorrer({ casoId, requiereGenerador, datos, onVolver, onCompl
   const numCasos = requiereGenerador ? 30 : Math.max(datos.documentosExistentes?.length ?? 1, 1);
 
   useEffect(() => {
-    estimarCosto(casoId, datos.modelos, numCasos)
+    estimarCosto(casoId, datos.modelos, numCasos, requiereGenerador ? datos.kbDocs : undefined)
       .then(setEstimacion)
       .catch((err) => setError(err instanceof Error ? err.message : "No se pudo estimar el costo de la corrida."));
     return () => {
@@ -182,6 +182,12 @@ export function PasoCorrer({ casoId, requiereGenerador, datos, onVolver, onCompl
             <span className="font-mono text-2xl font-medium">${estimacion.costoTotalUsd.toFixed(2)} USD</span>
           </div>
           <div className="mt-3 space-y-1">
+            {estimacion.costoGeneracionUsd !== undefined && (
+              <div className="flex justify-between font-mono text-xs text-tinta/60">
+                <span>Generar el dataset (LLM)</span>
+                <span>${estimacion.costoGeneracionUsd.toFixed(4)}</span>
+              </div>
+            )}
             {estimacion.costoPorModelo.map((m) => (
               <div key={m.modelo} className="flex justify-between font-mono text-xs text-tinta/60">
                 <span>{m.modelo}</span>
@@ -189,6 +195,11 @@ export function PasoCorrer({ casoId, requiereGenerador, datos, onVolver, onCompl
               </div>
             ))}
           </div>
+          {estimacion.costoGeneracionUsd !== undefined && (
+            <p className="mt-3 text-xs text-tinta/50">
+              "Generar el dataset" se cobra al hacer click en "Generar dataset" (abajo); el resto se cobra al confirmar y correr.
+            </p>
+          )}
         </div>
       )}
 
@@ -200,7 +211,7 @@ export function PasoCorrer({ casoId, requiereGenerador, datos, onVolver, onCompl
           </div>
           <p className="mb-3 text-sm text-tinta/60">
             {requiereGenerador
-              ? "Estas preguntas las generó Vectora a partir de tu knowledge base. Podés editarlas (y la respuesta esperada provisional) antes de gastar la corrida."
+              ? "Un LLM generó estas preguntas a partir de tu knowledge base (ya se cobró esa generación). Podés editarlas — y la respuesta esperada provisional — antes de confirmar y gastar la corrida contra el panel de modelos."
               : "Estos son los documentos que vas a evaluar."}
           </p>
           <div className="max-h-[28rem] space-y-3 overflow-y-auto pr-1">

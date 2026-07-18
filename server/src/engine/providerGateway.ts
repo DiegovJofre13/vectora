@@ -24,6 +24,11 @@ export function modeloSoportadoPorGateway(modelo: string): boolean {
   return modelo in PRECIOS_OPENAI;
 }
 
+/** Precio por 1K tokens del modelo, si el gateway lo soporta — para estimar costo antes de llamar. */
+export function precioGateway(modelo: string): { entrada1K: number; salida1K: number } | undefined {
+  return PRECIOS_OPENAI[modelo];
+}
+
 export interface ResultadoGateway {
   texto: string;
   tokensEntrada: number;

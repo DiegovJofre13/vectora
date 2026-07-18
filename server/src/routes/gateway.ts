@@ -1,5 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
+import { db } from "../lib/db.js";
 import { buscarOrganizacionPorApiKey, registrarConsumo, verificarSaldoSuficiente } from "../engine/credits.js";
 import { completarConGateway } from "../engine/providerGateway.js";
 import { aplicarMargen } from "../engine/billing.js";
@@ -45,8 +46,17 @@ export async function registrarRutasGateway(app: FastifyInstance): Promise<void>
       const resultado = await completarConGateway(parsed.data.modelo, parsed.data.prompt, parsed.data.formato);
       const { margenUsd, totalUsd } = aplicarMargen(resultado.costoBaseUsd);
 
+      // Liga el consumo a la corrida (para que el costo total de una corrida sea la suma real
+      // del ledger — generación del dataset + cada llamada de evaluación, ver orchestrator.ts).
+      // El SDK del cliente solo manda casoPruebaId, no evaluacionCorridaId — se resuelve acá.
+      const evaluacionCorridaId = parsed.data.casoPruebaId
+        ? (await db.casoPrueba.findUnique({ where: { id: parsed.data.casoPruebaId }, select: { evaluacionCorridaId: true } }))
+            ?.evaluacionCorridaId
+        : undefined;
+
       await registrarConsumo({
         organizacionId: organizacion.id,
+        evaluacionCorridaId,
         costoBaseUsd: resultado.costoBaseUsd,
         margenUsd,
         descripcion: `Gateway: ${parsed.data.modelo} (${resultado.tokensEntrada}+${resultado.tokensSalida} tokens)${parsed.data.casoPruebaId ? ` — caso ${parsed.data.casoPruebaId}` : ""}`,

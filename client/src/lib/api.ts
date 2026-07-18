@@ -37,6 +37,8 @@ export interface EstimacionCosto {
   costoPorModelo: { modelo: string; costoUsd: number }[];
   numCasos: number;
   numModelos: number;
+  /** Costo estimado de generar el dataset con LLM (RAG/conversacional), ya sumado en costoTotalUsd. */
+  costoGeneracionUsd?: number;
 }
 
 export interface ProgresoCorrida {
@@ -166,10 +168,10 @@ export async function obtenerKbAutomatica(casoId: string, probeUrl: string): Pro
   }
 }
 
-export async function estimarCosto(casoId: string, modelos: string[], numCasos?: number): Promise<EstimacionCosto> {
+export async function estimarCosto(casoId: string, modelos: string[], numCasos?: number, kbDocs?: KbDocInput[]): Promise<EstimacionCosto> {
   const data = await req<{ estimacion: EstimacionCosto }>(`/api/casos-de-uso/${casoId}/estimar-costo`, {
     method: "POST",
-    body: JSON.stringify({ modelos, numCasos }),
+    body: JSON.stringify({ modelos, numCasos, kbDocs }),
   });
   return data.estimacion;
 }

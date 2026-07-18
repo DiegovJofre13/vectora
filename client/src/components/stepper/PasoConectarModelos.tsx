@@ -122,8 +122,11 @@ export function PasoConectarModelos({
       setEstimacion(null);
       return;
     }
-    estimarCosto(casoId, [...seleccionados], numCasos).then(setEstimacion).catch(() => setEstimacion(null));
-  }, [seleccionados, casoId, numCasos]);
+    estimarCosto(casoId, [...seleccionados], numCasos, requiereGenerador ? kbDocs : undefined)
+      .then(setEstimacion)
+      .catch(() => setEstimacion(null));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [seleccionados, casoId, numCasos, kbDocs]);
 
   async function handleVerificar() {
     setVerificando(true);
@@ -426,6 +429,9 @@ export function PasoConectarModelos({
             </div>
             <p className="mt-1 text-xs text-tinta/50">
               {estimacion.numCasos} casos × {estimacion.numModelos} modelos
+              {estimacion.costoGeneracionUsd !== undefined && (
+                <> · incluye ${estimacion.costoGeneracionUsd.toFixed(4)} de generar el dataset con LLM</>
+              )}
             </p>
           </div>
         )}

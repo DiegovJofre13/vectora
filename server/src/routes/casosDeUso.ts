@@ -24,6 +24,8 @@ const verificarConexionSchema = z.object({
 const estimarCostoSchema = z.object({
   modelos: z.array(z.string()).min(1),
   numCasos: z.number().int().positive().optional(),
+  /** Si viene (caso RAG/conversacional con KB ya cargado), se suma el costo estimado de generar el dataset con LLM. */
+  kbDocs: z.array(z.object({ titulo: z.string(), contenido: z.string() })).optional(),
 });
 
 /** Timeout corto: verificar conexión debe ser rápido, es un chequeo antes de gastar una corrida completa. */
@@ -161,6 +163,7 @@ export async function registrarRutasCasosDeUso(app: FastifyInstance): Promise<vo
       modelos: parsed.data.modelos,
       numCasos,
       tipoEstimacion: requiereGenerador ? "rag" : "estructural",
+      kbDocsParaGeneracion: requiereGenerador && parsed.data.kbDocs ? parsed.data.kbDocs : undefined,
     });
     return { estimacion };
   });
