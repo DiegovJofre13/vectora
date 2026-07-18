@@ -59,6 +59,13 @@ model CasoDeUso {
   /// borrador | conectado | evaluado
   estado String @default("borrador")
 
+  /// Archivado = oculto de la lista principal, reversible, no borra nada (evaluaciones,
+  /// resultados y créditos gastados quedan intactos). El borrado real (DELETE) solo se
+  /// permite para casos "borrador" sin evaluaciones — CasoDeUso no tiene cascada configurada
+  /// hacia EvaluacionCorrida/CorreccionJuicio/EventoGobernanza a propósito, para no poder
+  /// borrar historial de evaluaciones ni de gasto de créditos por accidente.
+  archivado Boolean @default(false)
+
   modeloProduccion       String?
   costoMensualProduccion Float?
   volumenMensual         Int?

@@ -9,6 +9,7 @@ export interface CasoDeUsoResumen {
   dominio: string;
   probeUrl: string | null;
   estado: string;
+  archivado: boolean;
   modeloProduccion: string | null;
   costoMensualProduccion: number | null;
   volumenMensual: number | null;
@@ -97,9 +98,21 @@ export async function obtenerSalud(): Promise<{ ok: boolean; organizaciones: num
   return req("/api/salud");
 }
 
-export async function listarCasosDeUso(): Promise<CasoDeUsoResumen[]> {
-  const data = await req<{ casos: CasoDeUsoResumen[] }>("/api/casos-de-uso");
+export async function listarCasosDeUso(incluirArchivados = false): Promise<CasoDeUsoResumen[]> {
+  const data = await req<{ casos: CasoDeUsoResumen[] }>(`/api/casos-de-uso${incluirArchivados ? "?incluirArchivados=true" : ""}`);
   return data.casos;
+}
+
+export async function archivarCaso(casoId: string): Promise<{ ok: boolean; error?: string }> {
+  return req(`/api/casos-de-uso/${casoId}/archivar`, { method: "POST", body: "{}" });
+}
+
+export async function desarchivarCaso(casoId: string): Promise<{ ok: boolean; error?: string }> {
+  return req(`/api/casos-de-uso/${casoId}/desarchivar`, { method: "POST", body: "{}" });
+}
+
+export async function eliminarCaso(casoId: string): Promise<{ ok: boolean; error?: string }> {
+  return req(`/api/casos-de-uso/${casoId}`, { method: "DELETE", body: "{}" });
 }
 
 export async function obtenerCaso(id: string): Promise<any> {

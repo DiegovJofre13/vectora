@@ -168,12 +168,57 @@ export async function registrarRutasCasosDeUso(app: FastifyInstance): Promise<vo
     return { estimacion };
   });
 
-  app.get("/api/casos-de-uso", async () => {
+  app.get<{ Querystring: { incluirArchivados?: string } }>("/api/casos-de-uso", async (req) => {
     const casos = await db.casoDeUso.findMany({
+      where: req.query.incluirArchivados === "true" ? {} : { archivado: false },
       include: { organizacion: true, evaluaciones: { orderBy: { createdAt: "desc" }, take: 1 } },
       orderBy: { createdAt: "desc" },
     });
     return { casos };
+  });
+
+  app.post<{ Params: { id: string } }>("/api/casos-de-uso/:id/archivar", async (req, reply) => {
+    const caso = await db.casoDeUso.findUnique({ where: { id: req.params.id } });
+    if (!caso) {
+      reply.code(404);
+      return { ok: false, error: "Caso de uso no encontrado" };
+    }
+    await db.casoDeUso.update({ where: { id: req.params.id }, data: { archivado: true } });
+    return { ok: true };
+  });
+
+  app.post<{ Params: { id: string } }>("/api/casos-de-uso/:id/desarchivar", async (req, reply) => {
+    const caso = await db.casoDeUso.findUnique({ where: { id: req.params.id } });
+    if (!caso) {
+      reply.code(404);
+      return { ok: false, error: "Caso de uso no encontrado" };
+    }
+    await db.casoDeUso.update({ where: { id: req.params.id }, data: { archivado: false } });
+    return { ok: true };
+  });
+
+  // Borrado real, no reversible. Solo permitido para casos que nunca llegaron a correr nada —
+  // sin eso, la falta de cascada hacia EvaluacionCorrida/CorreccionJuicio/EventoGobernanza
+  // haría fallar el delete en la base de todos modos (a propósito, ver nota en schema.prisma).
+  app.delete<{ Params: { id: string } }>("/api/casos-de-uso/:id", async (req, reply) => {
+    const caso = await db.casoDeUso.findUnique({
+      where: { id: req.params.id },
+      include: { _count: { select: { evaluaciones: true, correccionesJuicio: true, eventosGobernanza: true } } },
+    });
+    if (!caso) {
+      reply.code(404);
+      return { ok: false, error: "Caso de uso no encontrado" };
+    }
+    const tieneHistorial = caso._count.evaluaciones > 0 || caso._count.correccionesJuicio > 0 || caso._count.eventosGobernanza > 0;
+    if (caso.estado !== "borrador" || tieneHistorial) {
+      reply.code(422);
+      return {
+        ok: false,
+        error: "Este caso ya tiene evaluaciones, correcciones o eventos asociados — no se puede borrar. Usá 'Archivar' en su lugar.",
+      };
+    }
+    await db.casoDeUso.delete({ where: { id: req.params.id } });
+    return { ok: true };
   });
 
   app.get<{ Params: { id: string } }>("/api/casos-de-uso/:id", async (req, reply) => {

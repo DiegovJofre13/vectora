@@ -1,5 +1,5 @@
-import { useEffect, useState } from "react";
-import { listarCasosDeUso, type CasoDeUsoResumen } from "../lib/api.js";
+import { useEffect, useState, type MouseEvent } from "react";
+import { archivarCaso, desarchivarCaso, eliminarCaso, listarCasosDeUso, type CasoDeUsoResumen } from "../lib/api.js";
 
 interface CasoConEvaluaciones extends CasoDeUsoResumen {
   evaluaciones: { id: string; estado: string }[];
@@ -32,12 +32,44 @@ interface Props {
 export function ListaCasos({ onNuevoCaso, onVerReporte }: Props) {
   const [casos, setCasos] = useState<CasoConEvaluaciones[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [verArchivados, setVerArchivados] = useState(false);
+  const [accionEnCurso, setAccionEnCurso] = useState<string | null>(null);
 
-  useEffect(() => {
-    listarCasosDeUso()
+  function recargar() {
+    listarCasosDeUso(verArchivados)
       .then((data) => setCasos(data as CasoConEvaluaciones[]))
       .catch((err) => setError(err instanceof Error ? err.message : "Error desconocido"));
-  }, []);
+  }
+
+  useEffect(recargar, [verArchivados]);
+
+  async function handleArchivar(e: MouseEvent, casoId: string, archivado: boolean) {
+    e.stopPropagation();
+    setAccionEnCurso(casoId);
+    try {
+      await (archivado ? desarchivarCaso(casoId) : archivarCaso(casoId));
+      recargar();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "No se pudo archivar el caso.");
+    } finally {
+      setAccionEnCurso(null);
+    }
+  }
+
+  async function handleEliminar(e: MouseEvent, casoId: string, nombre: string) {
+    e.stopPropagation();
+    if (!window.confirm(`¿Borrar "${nombre}" permanentemente? Esto no se puede deshacer.`)) return;
+    setAccionEnCurso(casoId);
+    try {
+      const res = await eliminarCaso(casoId);
+      if (!res.ok) throw new Error(res.error ?? "No se pudo borrar el caso.");
+      recargar();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "No se pudo borrar el caso.");
+    } finally {
+      setAccionEnCurso(null);
+    }
+  }
 
   return (
     <div>
@@ -53,6 +85,11 @@ export function ListaCasos({ onNuevoCaso, onVerReporte }: Props) {
           + Nuevo caso de uso
         </button>
       </div>
+
+      <label className="mt-4 flex items-center gap-2 text-sm text-tinta/60">
+        <input type="checkbox" checked={verArchivados} onChange={(e) => setVerArchivados(e.target.checked)} />
+        Ver archivados
+      </label>
 
       {error && (
         <div className="mt-6 rounded-card border border-coral/30 bg-coral/5 p-4 text-sm text-coral">
@@ -78,15 +115,17 @@ export function ListaCasos({ onNuevoCaso, onVerReporte }: Props) {
             const estado = ETIQUETA_ESTADO[caso.estado] ?? { texto: caso.estado, color: "text-tinta/60" };
             const ultimaEvaluacion = caso.evaluaciones[0];
             const clickable = caso.estado === "evaluado" && ultimaEvaluacion;
+            const puedeEliminar = caso.estado === "borrador" && caso.evaluaciones.length === 0;
+            const ocupado = accionEnCurso === caso.id;
             return (
               <div
                 key={caso.id}
                 onClick={() => clickable && onVerReporte(caso.id, ultimaEvaluacion.id)}
-                className={`rounded-card border border-linea bg-superficie p-5 shadow-sutil ${clickable ? "cursor-pointer hover:border-marca/40" : ""}`}
+                className={`rounded-card border border-linea bg-superficie p-5 shadow-sutil ${clickable ? "cursor-pointer hover:border-marca/40" : ""} ${caso.archivado ? "opacity-60" : ""}`}
               >
                 <div className="flex items-start justify-between">
                   <h2 className="font-display text-lg font-medium">{caso.nombre}</h2>
-                  <span className={`text-xs font-medium ${estado.color}`}>{estado.texto}</span>
+                  <span className={`text-xs font-medium ${estado.color}`}>{caso.archivado ? "Archivado" : estado.texto}</span>
                 </div>
                 <p className="mt-1 text-sm text-tinta/60">{caso.descripcion}</p>
                 <div className="mt-4 flex flex-wrap items-center gap-x-4 gap-y-1 font-mono text-xs text-tinta/70">
@@ -94,7 +133,27 @@ export function ListaCasos({ onNuevoCaso, onVerReporte }: Props) {
                   <span>modelo prod.: {caso.modeloProduccion ?? "—"}</span>
                   <span>costo/mes: {formatoUsd(caso.costoMensualProduccion)}</span>
                 </div>
-                {clickable && <p className="mt-3 text-xs font-medium text-marca">Ver reporte →</p>}
+                <div className="mt-3 flex items-center justify-between">
+                  {clickable && <p className="text-xs font-medium text-marca">Ver reporte →</p>}
+                  <div className="ml-auto flex gap-3">
+                    <button
+                      onClick={(e) => handleArchivar(e, caso.id, caso.archivado)}
+                      disabled={ocupado}
+                      className="text-xs text-tinta/50 hover:text-tinta disabled:opacity-40"
+                    >
+                      {caso.archivado ? "Desarchivar" : "Archivar"}
+                    </button>
+                    {puedeEliminar && (
+                      <button
+                        onClick={(e) => handleEliminar(e, caso.id, caso.nombre)}
+                        disabled={ocupado}
+                        className="text-xs text-coral hover:underline disabled:opacity-40"
+                      >
+                        Eliminar
+                      </button>
+                    )}
+                  </div>
+                </div>
               </div>
             );
           })}
